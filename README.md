@@ -4,9 +4,13 @@
 CpuSpeedTest_1:
 - Initial test for Cpu
 
-Depth 1 completed in 0 ms
-Depth 2 completed in 0 ms
-Depth 3 completed in 1 ms
-Depth 4 completed in 20 ms
-Depth 5 completed in 167 ms
-Depth 6 completed in 2711 ms
+- Depth 5: 167 ms
+- Depth 6: 2711 ms
+- Depth 7: 49662 ms
+
+CpuSpeedTest_2:
+- All 18 moves now included (instead of multiple quater turns). Changed so it will not turn the same face multiple times.
+
+- Depth 5: in 49 ms
+- Depth 6: in 577 ms
+- Depth 7: in 8421 ms

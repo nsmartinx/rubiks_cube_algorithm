@@ -1,28 +1,35 @@
 # —— CPU settings ——
-CXX        := g++
-CXXFLAGS   := -std=c++20 -O3 -Wall -Wextra
+CXX         := g++
+CXXFLAGS    := -std=c++20 -O3 -Wall -Wextra
 CPU1_TARGET := CpuSpeedTest_1
 CPU1_SRC    := CpuSpeedTest_1.cpp
+CPU2_TARGET := CpuSpeedTest_2
+CPU2_SRC    := CpuSpeedTest_2.cpp
 
 # —— GPU settings ——
 NVCC        := nvcc
 NVCCFLAGS   := -std=c++20 -O3
-GPU_TARGET  := GpuSpeedTest
-GPU_SRC     := GpuSpeedTest.cu
+GPU1_TARGET := GpuSpeedTest_1
+GPU1_SRC    := GpuSpeedTest_1.cu
 
-.PHONY: all cpu1 gpu clean
+.PHONY: all cpu1 cpu2 gpu1 clean
 
-all: cpu gpu
+all: cpu1 cpu2 gpu1
 
 cpu1: $(CPU1_TARGET)
 
 $(CPU1_TARGET): $(CPU1_SRC)
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
-gpu: $(GPU_TARGET)
+cpu2: $(CPU2_TARGET)
 
-$(GPU_TARGET): $(GPU_SRC)
+$(CPU2_TARGET): $(CPU2_SRC)
+	$(CXX) $(CXXFLAGS) -o $@ $<
+
+gpu1: $(GPU1_TARGET)
+
+$(GPU1_TARGET): $(GPU1_SRC)
 	$(NVCC) $(NVCCFLAGS) -o $@ $<
 
 clean:
-	@rm -f $(CPU_TARGET) $(GPU_TARGET)
+	@rm -f $(CPU1_TARGET) $(CPU2_TARGET) $(GPU1_TARGET)

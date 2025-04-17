@@ -7,7 +7,7 @@
 using u64 = uint64_t;
 
 // —— Configuration ——
-// maximum brute‑force depth;
+// maximum brute‑force depth
 #define MAX_SEARCH_DEPTH 7
 
 // —— Cubie‑level raw quarter‑turn moves ——
@@ -20,25 +20,26 @@ struct RawMove {
     int edgeOrientation[12];
 };
 
-RawMove quarterTurns[6] = {
-    // U
-    { {3,0,1,2,4,5,6,7}, {0,0,0,0,0,0,0,0},
-      {3,0,1,2,4,5,6,7,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} },
-    // R
-    { {4,1,2,0,7,5,6,3}, {2,0,0,1,1,0,0,2},
-      {8,1,2,3,11,5,6,7,4,9,10,0},    {0,0,0,0,0,0,0,0,0,0,0,0} },
-    // F
-    { {1,5,2,3,0,4,6,7}, {1,2,0,0,2,1,0,0},
-      {0,9,2,3,4,8,6,7,1,5,10,11},    {0,1,0,0,0,1,0,0,1,1,0,0} },
-    // D
-    { {0,1,2,3,5,6,7,4}, {0,0,0,0,0,0,0,0},
-      {0,1,2,3,5,6,7,4,8,9,10,11},    {0,0,0,0,0,0,0,0,0,0,0,0} },
-    // L
-    { {0,2,6,3,4,1,5,7}, {0,1,2,0,0,2,1,0},
-      {0,1,10,3,4,5,9,7,8,2,6,11},    {0,0,0,0,0,0,0,0,0,0,0,0} },
-    // B
-    { {0,1,3,7,4,5,2,6}, {0,0,1,2,0,0,2,1},
-      {0,1,2,11,4,5,6,10,8,9,3,7},    {0,0,0,1,0,0,0,1,0,0,1,1} }
+// Precomputed raw moves for all 18 face turns
+RawMove moves[18] = {
+    { {3,0,1,2,4,5,6,7}, {0,0,0,0,0,0,0,0}, {3,0,1,2,4,5,6,7,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // U
+    { {2,3,0,1,4,5,6,7}, {0,0,0,0,0,0,0,0}, {2,3,0,1,4,5,6,7,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // U2
+    { {1,2,3,0,4,5,6,7}, {0,0,0,0,0,0,0,0}, {1,2,3,0,4,5,6,7,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // U'
+    { {4,1,2,0,7,5,6,3}, {2,0,0,1,1,0,0,2}, {8,1,2,3,11,5,6,7,4,9,10,0}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // R
+    { {7,1,2,4,3,5,6,0}, {0,0,0,0,0,0,0,0}, {4,1,2,3,0,5,6,7,11,9,10,8}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // R2
+    { {3,1,2,7,0,5,6,4}, {2,0,0,1,1,0,0,2}, {11,1,2,3,8,5,6,7,0,9,10,4}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // R'
+    { {1,5,2,3,0,4,6,7}, {1,2,0,0,2,1,0,0}, {0,9,2,3,4,8,6,7,1,5,10,11}, {0,1,0,0,0,1,0,0,1,1,0,0} }, // F
+    { {5,4,2,3,1,0,6,7}, {0,0,0,0,0,0,0,0}, {0,5,2,3,4,1,6,7,9,8,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // F2
+    { {4,0,2,3,5,1,6,7}, {1,2,0,0,2,1,0,0}, {0,8,2,3,4,9,6,7,5,1,10,11}, {0,1,0,0,0,1,0,0,1,1,0,0} }, // F'
+    { {0,1,2,3,5,6,7,4}, {0,0,0,0,0,0,0,0}, {0,1,2,3,5,6,7,4,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // D
+    { {0,1,2,3,6,7,4,5}, {0,0,0,0,0,0,0,0}, {0,1,2,3,6,7,4,5,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // D2
+    { {0,1,2,3,7,4,5,6}, {0,0,0,0,0,0,0,0}, {0,1,2,3,7,4,5,6,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // D'
+    { {0,2,6,3,4,1,5,7}, {0,1,2,0,0,2,1,0}, {0,1,10,3,4,5,9,7,8,2,6,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // L
+    { {0,6,5,3,4,2,1,7}, {0,0,0,0,0,0,0,0}, {0,1,6,3,4,5,2,7,8,10,9,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // L2
+    { {0,5,1,3,4,6,2,7}, {0,1,2,0,0,2,1,0}, {0,1,9,3,4,5,10,7,8,6,2,11}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // L'
+    { {0,1,3,7,4,5,2,6}, {0,0,1,2,0,0,2,1}, {0,1,2,11,4,5,6,10,8,9,3,7}, {0,0,0,1,0,0,0,1,0,0,1,1} }, // B
+    { {0,1,7,6,4,5,3,2}, {0,0,0,0,0,0,0,0}, {0,1,2,7,4,5,6,3,8,9,11,10}, {0,0,0,0,0,0,0,0,0,0,0,0} }, // B2
+    { {0,1,6,2,4,5,7,3}, {0,0,1,2,0,0,2,1}, {0,1,2,10,4,5,6,11,8,9,7,3}, {0,0,0,1,0,0,0,1,0,0,1,1} }  // B'
 };
 
 // human‑readable move names
@@ -85,9 +86,12 @@ u64 solvedCornersState, solvedEdgesState;
 // flag to skip further checks after first solution
 bool foundSolution = false;
 
-// apply one quarter‑turn
-void applyQuarterTurn(int face) {
-    const RawMove& mv = quarterTurns[face];
+// record current path
+int solutionMoves[MAX_SEARCH_DEPTH];
+
+// apply any of the 18 moves directly
+void applyTurn(int move) {
+    const RawMove& mv = moves[move];
     u64 oldCorners   = cornersState;
     u64 oldEdges     = edgesState;
     u64 newCorners   = 0;
@@ -117,14 +121,6 @@ void applyQuarterTurn(int face) {
     edgesState   = newEdges;
 }
 
-// apply any of the 18 moves (turn=0: CW, 1: 180, 2: CCW)
-void applyTurn(int move) {
-    int faceIndex = move / 3;
-    int turnType  = move % 3;
-    int repeats   = (turnType == 1 ? 2 : (turnType == 2 ? 3 : 1));
-    while (repeats--) applyQuarterTurn(faceIndex);
-}
-
 // initialize to solved state
 void initCube() {
     cornersState = edgesState = 0;
@@ -133,9 +129,6 @@ void initCube() {
     solvedCornersState = cornersState;
     solvedEdgesState   = edgesState;
 }
-
-// record current path
-int solutionMoves[MAX_SEARCH_DEPTH];
 
 // print the found solution
 void printSolution(int depth) {
@@ -147,7 +140,7 @@ void printSolution(int depth) {
     std::cout << "\n";
 }
 
-// depth‑limited brute force, prints first solution but continues exploring
+// depth‑limited brute force, prevents same-face consecutive moves
 void searchDepthLimited(int maxDepth, int depth = 0) {
     if (!foundSolution && depth > 0
         && cornersState == solvedCornersState
@@ -158,6 +151,8 @@ void searchDepthLimited(int maxDepth, int depth = 0) {
     if (depth == maxDepth) return;
 
     for (int move = 0; move < 18; ++move) {
+        // skip if same face as previous move
+        if (depth > 0 && (move / 3) == (solutionMoves[depth - 1] / 3)) continue;
         applyTurn(move);
         solutionMoves[depth] = move;
         searchDepthLimited(maxDepth, depth + 1);
