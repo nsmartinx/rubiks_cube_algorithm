@@ -11,10 +11,12 @@ NVCC        := nvcc
 NVCCFLAGS   := -std=c++20 -O3
 GPU1_TARGET := GpuSpeedTest_1
 GPU1_SRC    := GpuSpeedTest_1.cu
+GPU2_TARGET := GpuSpeedTest_2
+GPU2_SRC    := GpuSpeedTest_2.cu
 
-.PHONY: all cpu1 cpu2 gpu1 clean
+.PHONY: all cpu1 cpu2 gpu1 gpu2 clean
 
-all: cpu1 cpu2 gpu1
+all: cpu1 cpu2 gpu1 gpu2
 
 cpu1: $(CPU1_TARGET)
 
@@ -31,5 +33,10 @@ gpu1: $(GPU1_TARGET)
 $(GPU1_TARGET): $(GPU1_SRC)
 	$(NVCC) $(NVCCFLAGS) -o $@ $<
 
+gpu2: $(GPU2_TARGET)
+
+$(GPU2_TARGET): $(GPU2_SRC)
+	$(NVCC) $(NVCCFLAGS) -o $@ $<
+
 clean:
-	@rm -f $(CPU1_TARGET) $(CPU2_TARGET) $(GPU1_TARGET)
+	@rm -f $(CPU1_TARGET) $(CPU2_TARGET) $(GPU1_TARGET) $(GPU2_TARGET)

@@ -19,3 +19,10 @@ Same as Cpu test 1 but on gpu:
 - Depth 6 completed in 36 ms
 - Depth 7 completed in 679 ms
 - Depth 8 completed in 13256 ms
+
+### GpuSpeedTest_2:
+Same as Cpu test 1 but on gpu:
+- Depth 5 completed in 1 ms
+- Depth 6 completed in 27 ms
+- Depth 7 completed in 480 ms
+- Depth 8 completed in 8290 ms
