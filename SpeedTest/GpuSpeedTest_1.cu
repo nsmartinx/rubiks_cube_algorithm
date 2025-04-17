@@ -1,143 +1,262 @@
 #include <iostream>
+#include <vector>
+#include <string>
 #include <cstdint>
-#include <cmath>
+#include <chrono>
 #include <cuda_runtime.h>
 
 using u64 = uint64_t;
 
 // —— Configuration ——
-#define MAX_DEPTH 8
-#define THREADS_PER_BLOCK 256
+#define MAX_SEARCH_DEPTH 8
 
-// —— Cubie‐level raw quarter‑turn moves ——
+// —— Cubie‑level raw quarter‑turn moves ——
 // corner slots: 0=URF,1=UFL,2=ULB,3=UBR,4=DFR,5=DLF,6=DBL,7=DRB
 // edge   slots: 0=UR, 1=UF, 2=UL, 3=UB, 4=DR, 5=DF, 6=DL, 7=DB, 8=FR, 9=FL, 10=BL, 11=BR
 struct RawMove {
-    int cp[8], co[8];
-    int ep[12], eo[12];
+    int corner_permutation[8];
+    int corner_orientation[8];
+    int edge_permutation[12];
+    int edge_orientation[12];
 };
 
-// host‐side definitions
-static const RawMove h_quarterMoves[6] = {
+// Host‑side move definitions
+RawMove hostQuarterTurns[6] = {
     // U
-    { {3,0,1,2,4,5,6,7}, {0,0,0,0,0,0,0,0},
-      {3,0,1,2,4,5,6,7,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} },
+    { { 3, 0, 1, 2, 4, 5, 6, 7 }, { 0, 0, 0, 0, 0, 0, 0, 0 },
+      { 3, 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
     // R
-    { {4,1,2,0,7,5,6,3}, {2,0,0,1,1,0,0,2},
-      {8,1,2,3,11,5,6,7,4,9,10,0}, {0,0,0,0,0,0,0,0,0,0,0,0} },
+    { { 4, 1, 2, 0, 7, 5, 6, 3 }, { 2, 0, 0, 1, 1, 0, 0, 2 },
+      { 8, 1, 2, 3, 11, 5, 6, 7, 4, 9, 10, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
     // F
-    { {1,5,2,3,0,4,6,7}, {1,2,0,0,2,1,0,0},
-      {0,9,2,3,4,8,6,7,1,5,10,11}, {0,1,0,0,0,1,0,0,1,1,0,0} },
+    { { 1, 5, 2, 3, 0, 4, 6, 7 }, { 1, 2, 0, 0, 2, 1, 0, 0 },
+      { 0, 9, 2, 3, 4, 8, 6, 7, 1, 5, 10, 11 }, { 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0 } },
     // D
-    { {0,1,2,3,5,6,7,4}, {0,0,0,0,0,0,0,0},
-      {0,1,2,3,5,6,7,4,8,9,10,11}, {0,0,0,0,0,0,0,0,0,0,0,0} },
+    { { 0, 1, 2, 3, 5, 6, 7, 4 }, { 0, 0, 0, 0, 0, 0, 0, 0 },
+      { 0, 1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
     // L
-    { {0,2,6,3,4,1,5,7}, {0,1,2,0,0,2,1,0},
-      {0,1,10,3,4,5,9,7,8,2,6,11}, {0,0,0,0,0,0,0,0,0,0,0,0} },
+    { { 0, 2, 6, 3, 4, 1, 5, 7 }, { 0, 1, 2, 0, 0, 2, 1, 0 },
+      { 0, 1, 10, 3, 4, 5, 9, 7, 8, 2, 6, 11 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
     // B
-    { {0,1,3,7,4,5,2,6}, {0,0,1,2,0,0,2,1},
-      {0,1,2,11,4,5,6,10,8,9,3,7}, {0,0,0,1,0,0,0,1,0,0,1,1} }
+    { { 0, 1, 3, 7, 4, 5, 2, 6 }, { 0, 0, 1, 2, 0, 0, 2, 1 },
+      { 0, 1, 2, 11, 4, 5, 6, 10, 8, 9, 3, 7 }, { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1 } }
 };
 
-// device‐side (constant) copies
-__constant__ RawMove d_quarterMoves[6];
-__constant__ u64 d_solvedC;
-__constant__ u64 d_solvedE;
+// Device‑side constant memory for moves
+__constant__ RawMove deviceQuarterTurns[6];
 
-// apply one quarter‐turn on GPU (in‐place)
-__device__ inline void applyQuarterMoveGPU(u64 &C, u64 &E, int f) {
-    const RawMove &m = d_quarterMoves[f];
-    u64 oldC = C, oldE = E;
-    u64 newC = 0, newE = 0;
-
-    // corners
-    #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        u64 field = (oldC >> (5*i)) & 0x1FULL;
-        int idx =  field        & 0x7;        // bits [0..2]
-        int ori = (field >> 3)  & 0x3;        // bits [3..4]
-        int newOri = (ori + m.co[i]) % 3;
-        int dest   = m.cp[i];
-        u64 nf = u64(idx) | (u64(newOri) << 3);
-        newC |= (nf << (5*dest));
+// Parse a move token (e.g. "R2" → index 4)
+int parseMoveToken(const std::string &token) {
+    if (token.empty()) return -1;
+    int face;
+    switch (token[0]) {
+        case 'U': face = 0; break;
+        case 'R': face = 1; break;
+        case 'F': face = 2; break;
+        case 'D': face = 3; break;
+        case 'L': face = 4; break;
+        case 'B': face = 5; break;
+        default: return -1;
     }
-
-    // edges
-    #pragma unroll
-    for (int j = 0; j < 12; ++j) {
-        u64 field = (oldE >> (5*j)) & 0x1FULL;
-        int idx =   field        & 0xF;       // bits [0..3]
-        int ori =  (field >> 4)  & 0x1;       // bit 4
-        int newOri = ori ^ m.eo[j];
-        int dest   = m.ep[j];
-        u64 nf = u64(idx) | (u64(newOri) << 4);
-        newE |= (nf << (5*dest));
+    int type = 0;
+    if (token.size() == 2) {
+        type = (token[1] == '2' ? 1 : 2);
     }
-
-    C = newC;
-    E = newE;
+    return face * 3 + type;
 }
 
-// GPU kernel: each thread decodes a unique sequence of length `depth` and applies it
-__global__ void bruteKernel(int depth, u64 totalSequences) {
-    u64 idx = u64(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (idx >= totalSequences) return;
+// Inverse of a move index
+inline int inverseMoveIndex(int moveIndex) {
+    int faceIndex = moveIndex / 3;
+    int turnType  = moveIndex % 3;
+    int inverseType = (turnType == 0 ? 2 : (turnType == 1 ? 1 : 0));
+    return faceIndex * 3 + inverseType;
+}
 
-    // start from solved
-    u64 C = d_solvedC;
-    u64 E = d_solvedE;
+// Apply one quarter‑turn on CPU
+void applyQuarterTurnCPU(u64 &cornerState, u64 &edgeState, int face) {
+    RawMove mv = hostQuarterTurns[face];
+    u64 oldCorners = cornerState;
+    u64 oldEdges   = edgeState;
+    u64 newCorners = 0;
+    u64 newEdges   = 0;
 
-    // decode idx in base‑18, LS digit first
-    u64 tmp = idx;
+    for (int i = 0; i < 8; ++i) {
+        u64 packed = (oldCorners >> (5 * i)) & 0x1FULL;
+        int piece           = packed & 7;
+        int orientation     = (packed >> 3) & 3;
+        int newOrientation  = (orientation + mv.corner_orientation[i]) % 3;
+        int destinationSlot = mv.corner_permutation[i];
+        u64 packedOutput    = u64(piece) | (u64(newOrientation) << 3);
+        newCorners         |= packedOutput << (5 * destinationSlot);
+    }
+    for (int j = 0; j < 12; ++j) {
+        u64 packed = (oldEdges >> (5 * j)) & 0x1FULL;
+        int piece           = packed & 0xF;
+        int orientation     = (packed >> 4) & 1;
+        int newOrientation  = orientation ^ mv.edge_orientation[j];
+        int destinationSlot = mv.edge_permutation[j];
+        u64 packedOutput    = u64(piece) | (u64(newOrientation) << 4);
+        newEdges           |= packedOutput << (5 * destinationSlot);
+    }
+
+    cornerState = newCorners;
+    edgeState   = newEdges;
+}
+
+// Apply a move (0–17) on CPU
+void applyMoveCPU(u64 &cornerState, u64 &edgeState, int moveIndex) {
+    int faceIndex = moveIndex / 3;
+    int turnType  = moveIndex % 3;
+    int repetitions = (turnType == 1 ? 2 : (turnType == 2 ? 3 : 1));
+    for (int r = 0; r < repetitions; ++r) {
+        applyQuarterTurnCPU(cornerState, edgeState, faceIndex);
+    }
+}
+
+// GPU quarter‑turn
+__device__ void applyQuarterTurn(u64 &cornerState, u64 &edgeState, int face) {
+    RawMove mv = deviceQuarterTurns[face];
+    u64 oldCorners = cornerState;
+    u64 oldEdges   = edgeState;
+    u64 newCorners = 0;
+    u64 newEdges   = 0;
+    for (int i = 0; i < 8; ++i) {
+        u64 packed = (oldCorners >> (5 * i)) & 0x1FULL;
+        int piece           = packed & 7;
+        int orientation     = (packed >> 3) & 3;
+        int newOrientation  = (orientation + mv.corner_orientation[i]) % 3;
+        int destinationSlot = mv.corner_permutation[i];
+        u64 packedOutput    = u64(piece) | (u64(newOrientation) << 3);
+        newCorners         |= packedOutput << (5 * destinationSlot);
+    }
+    for (int j = 0; j < 12; ++j) {
+        u64 packed = (oldEdges >> (5 * j)) & 0x1FULL;
+        int piece           = packed & 0xF;
+        int orientation     = (packed >> 4) & 1;
+        int newOrientation  = orientation ^ mv.edge_orientation[j];
+        int destinationSlot = mv.edge_permutation[j];
+        u64 packedOutput    = u64(piece) | (u64(newOrientation) << 4);
+        newEdges           |= packedOutput << (5 * destinationSlot);
+    }
+    cornerState = newCorners;
+    edgeState   = newEdges;
+}
+
+// GPU full‑turn
+__device__ void applyMove(u64 &cornerState, u64 &edgeState, int moveIndex) {
+    int faceIndex = moveIndex / 3;
+    int turnType  = moveIndex % 3;
+    int repetitions = (turnType == 1 ? 2 : (turnType == 2 ? 3 : 1));
+    for (int r = 0; r < repetitions; ++r) {
+        applyQuarterTurn(cornerState, edgeState, faceIndex);
+    }
+}
+
+// Kernel: brute‑force sequences
+__global__ void bruteForceKernel(
+    u64 scrambledCorners,
+    u64 scrambledEdges,
+    u64 solvedCorners,
+    u64 solvedEdges,
+    int depth,
+    int *solBuffer,
+    int *foundFlag)
+{
+    unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned long long totalSeq = 1;
+    for (int i = 0; i < depth; ++i) totalSeq *= 18ULL;
+    if (tid >= totalSeq) return;
+
+    u64 cornerState = scrambledCorners;
+    u64 edgeState   = scrambledEdges;
+    int seq[MAX_SEARCH_DEPTH];
+    unsigned int id = tid;
     for (int i = 0; i < depth; ++i) {
-        int m = tmp % 18;
-        tmp /= 18;
-        int face = m / 3;
-        int turn = m % 3;
-        int times = (turn == 1 ? 2 : (turn == 2 ? 3 : 1));
-        #pragma unroll
-        for (int t = 0; t < times; ++t) {
-            applyQuarterMoveGPU(C, E, face);
+        seq[i] = id % 18;
+        id     /= 18;
+        applyMove(cornerState, edgeState, seq[i]);
+    }
+    if (cornerState == solvedCorners && edgeState == solvedEdges) {
+        if (atomicExch(foundFlag, 1) == 0) {
+            for (int i = 0; i < depth; ++i) solBuffer[i] = seq[i];
         }
     }
-    // we don't store C/E anywhere — this is purely to exercise the bit‑ops
 }
 
 int main() {
-    // copy moves into constant memory
-    cudaMemcpyToSymbol(d_quarterMoves, h_quarterMoves, sizeof(h_quarterMoves));
-    // build and copy solved‐state
-    u64 solvedC = 0, solvedE = 0;
-    for (int i = 0; i < 8; ++i) solvedC |= (u64(i) << (5*i));
-    for (int j = 0; j < 12; ++j) solvedE |= (u64(j) << (5*j));
-    cudaMemcpyToSymbol(d_solvedC, &solvedC, sizeof(u64));
-    cudaMemcpyToSymbol(d_solvedE, &solvedE, sizeof(u64));
+    // Init solved state
+    u64 solvedCorners = 0;
+    u64 solvedEdges   = 0;
+    for (int i = 0; i < 8; ++i) solvedCorners |= (u64(i) << (5 * i));
+    for (int j = 0; j < 12; ++j) solvedEdges   |= (u64(j) << (5 * j));
 
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    // Scramble moves
+    std::vector<std::string> scrambleMoves = { "U", "R2", "F'", "B2", "L" };
+    u64 scrambledCorners = solvedCorners;
+    u64 scrambledEdges   = solvedEdges;
 
-    for (int depth = 1; depth <= MAX_DEPTH; ++depth) {
-        // total number of sequences = 18^depth
-        u64 totalSeq = 1;
-        for (int i = 0; i < depth; ++i) totalSeq *= 18;
+    // Log scramble
+    std::cout << "Scrambling with:";
+    for (const auto &tok : scrambleMoves) std::cout << " " << tok;
+    std::cout << std::endl;
 
-        // launch configuration
-        u64 blocks = (totalSeq + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-
-        // time the kernel
-        cudaEventRecord(start);
-        bruteKernel<<<blocks, THREADS_PER_BLOCK>>>(depth, totalSeq);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-
-        float ms = 0;
-        cudaEventElapsedTime(&ms, start, stop);
-        std::cout << "Depth " << depth
-                  << "completed in " << ms << " ms\n";
+    // Apply scramble on CPU
+    for (const auto &tok : scrambleMoves) {
+        int mv = parseMoveToken(tok);
+        if (mv < 0) { std::cerr << "Invalid token: " << tok << std::endl; return 1; }
+        applyMoveCPU(scrambledCorners, scrambledEdges, mv);
     }
 
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
+    // Copy moves to GPU
+    cudaMemcpyToSymbol(deviceQuarterTurns, hostQuarterTurns, sizeof(RawMove) * 6);
+
+    // Allocate GPU buffers
+    int *d_solution, *d_flag;
+    cudaMalloc(&d_solution, sizeof(int) * MAX_SEARCH_DEPTH);
+    cudaMalloc(&d_flag, sizeof(int));
+    int zero = 0;
+    cudaMemcpy(d_flag, &zero, sizeof(int), cudaMemcpyHostToDevice);
+
+    bool printed = false;
+    auto start = std::chrono::steady_clock::now();
+
+    // Depth‑limited search
+    for (int depth = 1; depth <= MAX_SEARCH_DEPTH; ++depth) {
+        unsigned long long totalSeq = 1;
+        for (int i = 0; i < depth; ++i) totalSeq *= 18ULL;
+        int tpB = 256;
+        int blocks = (totalSeq + tpB - 1ULL) / tpB;
+        bruteForceKernel<<<blocks, tpB>>>(
+            scrambledCorners,
+            scrambledEdges,
+            solvedCorners,
+            solvedEdges,
+            depth,
+            d_solution,
+            d_flag
+        );
+        cudaDeviceSynchronize();
+
+        int found;
+        cudaMemcpy(&found, d_flag, sizeof(int), cudaMemcpyDeviceToHost);
+        if (found && !printed) {
+            int sol[MAX_SEARCH_DEPTH];
+            cudaMemcpy(sol, d_solution, sizeof(int) * depth, cudaMemcpyDeviceToHost);
+            std::cout << "Solution found (" << depth << " moves): ";
+            const char *names[18] = { "U","U2","U'","R","R2","R'",
+                                     "F","F2","F'","D","D2","D'",
+                                     "L","L2","L'","B","B2","B'" };
+            for (int i = 0; i < depth; ++i) std::cout << names[sol[i]] << (i+1<depth?' ':'\n');
+            printed = true;
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+        std::cout << "Depth " << depth << " completed in " << ms << " ms" << std::endl;
+    }
+
+    cudaFree(d_solution);
+    cudaFree(d_flag);
     return 0;
 }
