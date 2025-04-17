@@ -78,10 +78,7 @@ int parseMoveToken(const std::string & token) {
 }
 
 // Apply a raw move on CPU
-void applyRawMoveCPU(u64 & cornerState,
-                     u64 & edgeState,
-                     int moveIndex)
-{
+void applyRawMoveCPU(u64 & cornerState, u64 & edgeState, int moveIndex) {
     RawMove & move = moves18[moveIndex];
     u64 oldCornerState = cornerState;
     u64 oldEdgeState   = edgeState;
@@ -93,13 +90,10 @@ void applyRawMoveCPU(u64 & cornerState,
         u64 packed = (oldCornerState >> (5 * slot)) & 0x1FULL;
         int pieceIndex      = packed & 0x7;
         int orientation     = (packed >> 3) & 0x3;
-        int newOrientation  = (orientation
-                    + move.cornerOrientation[slot]) % 3;
+        int newOrientation  = (orientation + move.cornerOrientation[slot]) % 3;
         int destinationSlot = move.cornerPerm[slot];
-        u64 outPacked = u64(pieceIndex)
-                      | (u64(newOrientation) << 3);
-        newCornerState |= outPacked
-                        << (5 * destinationSlot);
+        u64 outPacked       = u64(pieceIndex) | (u64(newOrientation) << 3);
+        newCornerState     |= outPacked<< (5 * destinationSlot);
     }
 
     // Update edges
@@ -109,10 +103,8 @@ void applyRawMoveCPU(u64 & cornerState,
         int orientation     = (packed >> 4) & 0x1;
         int newOrientation  = orientation ^ move.edgeOrientation[slot];
         int destinationSlot = move.edgePerm[slot];
-        u64 outPacked = u64(pieceIndex)
-                      | (u64(newOrientation) << 4);
-        newEdgeState |= outPacked
-                      << (5 * destinationSlot);
+        u64 outPacked       = u64(pieceIndex) | (u64(newOrientation) << 4);
+        newEdgeState       |= outPacked << (5 * destinationSlot);
     }
 
     cornerState = newCornerState;
@@ -120,10 +112,7 @@ void applyRawMoveCPU(u64 & cornerState,
 }
 
 // Apply a raw move on GPU
-__device__ void applyRawMoveGPU(u64 & cornerState,
-                                u64 & edgeState,
-                                int moveIndex)
-{
+__device__ void applyRawMoveGPU(u64 & cornerState, u64 & edgeState, int moveIndex) {
     RawMove move = deviceMoves[moveIndex];
     u64 oldCornerState = cornerState;
     u64 oldEdgeState   = edgeState;
@@ -134,13 +123,10 @@ __device__ void applyRawMoveGPU(u64 & cornerState,
         u64 packed = (oldCornerState >> (5 * slot)) & 0x1FULL;
         int pieceIndex      = packed & 0x7;
         int orientation     = (packed >> 3) & 0x3;
-        int newOrientation  = (orientation
-                    + move.cornerOrientation[slot]) % 3;
+        int newOrientation  = (orientation + move.cornerOrientation[slot]) % 3;
         int destinationSlot = move.cornerPerm[slot];
-        u64 outPacked = u64(pieceIndex)
-                      | (u64(newOrientation) << 3);
-        newCornerState |= outPacked
-                        << (5 * destinationSlot);
+        u64 outPacked       = u64(pieceIndex) | (u64(newOrientation) << 3);
+        newCornerState     |= outPacked << (5 * destinationSlot);
     }
 
     for (int slot = 0; slot < 12; ++slot) {
@@ -185,9 +171,7 @@ __global__ void bruteForceKernel(
         moveSequence[i] = idCopy % 18;
         idCopy         /= 18;
         // skip if same face as previous
-        if (i > 0
-            && moveSequence[i] / 3
-               == moveSequence[i - 1] / 3) {
+        if (i > 0 && moveSequence[i] / 3 == moveSequence[i - 1] / 3) {
             return;
         }
         applyRawMoveGPU(
@@ -215,7 +199,7 @@ int main() {
         solvedCornerState |= (u64(i) << (5 * i));
     }
     for (int j = 0; j < 12; ++j) {
-        solvedEdgeState   |= (u64(j) << (5 * j));
+        solvedEdgeState |= (u64(j) << (5 * j));
     }
 
     // Hard‑coded scramble
@@ -230,8 +214,7 @@ int main() {
         std::cout << " " << token;
         int moveIndex = parseMoveToken(token);
         if (moveIndex < 0) {
-            std::cerr << "Error: invalid token '"
-                      << token << "'\n";
+            std::cerr << "Error: invalid token '" << token << "'\n";
             return 1;
         }
         applyRawMoveCPU(
@@ -252,10 +235,9 @@ int main() {
     // Allocate device buffers
     int * d_solution;
     int * d_solutionFlag;
-    cudaMalloc(& d_solution,
-               sizeof(int) * MAX_SEARCH_DEPTH);
-    cudaMalloc(& d_solutionFlag,
-               sizeof(int));
+    cudaMalloc(& d_solution, sizeof(int) * MAX_SEARCH_DEPTH);
+    cudaMalloc(& d_solutionFlag, sizeof(int));
+
     int zero = 0;
     cudaMemcpy(
         d_solutionFlag,
@@ -272,16 +254,13 @@ int main() {
         for (int i = 0; i < depth; ++i) {
             totalSequences *= 18ULL;
         }
+
         int threadsPerBlock = 256;
-        int blockCount      = static_cast<int>(
-            (totalSequences + threadsPerBlock - 1)
-            / threadsPerBlock
+        int blockCount = static_cast<int>(
+            (totalSequences + threadsPerBlock - 1) / threadsPerBlock
         );
 
-        bruteForceKernel<<<
-            blockCount,
-            threadsPerBlock
-        >>>(
+        bruteForceKernel<<<blockCount,threadsPerBlock>>>(
             scrambledCornerState,
             scrambledEdgeState,
             solvedCornerState,
@@ -294,13 +273,13 @@ int main() {
 
         int found;
         cudaMemcpy(
-            & found,
+            &found,
             d_solutionFlag,
             sizeof(int),
             cudaMemcpyDeviceToHost
         );
 
-        if (found && ! solutionPrinted) {
+        if (found && !solutionPrinted) {
             int solutionMoves[MAX_SEARCH_DEPTH];
             cudaMemcpy(
                 solutionMoves,
@@ -308,26 +287,18 @@ int main() {
                 sizeof(int) * depth,
                 cudaMemcpyDeviceToHost
             );
-            std::cout << "Solution found ("
-                      << depth << " moves): ";
+            std::cout << "Solution found (" << depth << " moves): ";
             for (int i = 0; i < depth; ++i) {
-                std::cout << moveNotationNames[
-                    solutionMoves[i]
-                ]
-                << (i + 1 < depth ? " " : "\n");
+                std::cout << moveNotationNames[solutionMoves[i]] << (i + 1 < depth ? " " : "\n");
             }
             solutionPrinted = true;
         }
 
         auto currentTime = std::chrono::steady_clock::now();
-        auto elapsedMs   = std::chrono::duration_cast<
-            std::chrono::milliseconds
-        >(
+        auto elapsedMs   = std::chrono::duration_cast<std::chrono::milliseconds>(
             currentTime - startTime
         ).count();
-        std::cout << "Depth " << depth
-                  << " completed in "
-                  << elapsedMs << " ms" << std::endl;
+        std::cout << "Depth " << depth << " completed in " << elapsedMs << " ms" << std::endl;
     }
 
     cudaFree(d_solution);
