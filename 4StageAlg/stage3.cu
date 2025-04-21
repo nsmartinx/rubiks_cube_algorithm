@@ -80,8 +80,8 @@ __device__ ESState applySSliceMoveGPU(ESState s, int m) {
 __device__ bool inTriads(CPState cp) {
     for (int slot = 0; slot < 8; ++slot) {
         int piece = (cp >> (3*slot)) & 0x7;
-        bool slotA  = (slot==0||slot==3||slot==4||slot==7);
-        bool pieceA = (piece==0||piece==3||piece==4||piece==7);
+        bool slotA  = (slot==0||slot==2||slot==5||slot==7);
+        bool pieceA = (piece==0||piece==2||piece==5||piece==7);
         if (slotA != pieceA) return false;
     }
     return true;
