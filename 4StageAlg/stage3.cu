@@ -87,6 +87,60 @@ __device__ bool inTriads(CPState cp) {
     return true;
 }
 
+// in your __device__ section:
+__device__ bool cornerParityEven(CPState cp) {
+    // unpack into a small array
+    int c[8];
+    #pragma unroll
+    for (int i = 0; i < 8; ++i)
+        c[i] = (cp >> (3*i)) & 0x7;
+    // count inversions mod 2
+    int inv = 0;
+    #pragma unroll
+    for (int i = 0; i < 8; ++i)
+        for (int j = i+1; j < 8; ++j)
+            inv ^= (c[i] > c[j]);
+    return inv == 0;
+}
+
+__device__ bool tetradTwistZero(CPState cp) {
+    // the two tetrads (these are the same groups used by inTriads):
+    constexpr int A[4] = {0,2,5,7};   // slots in tetrad A
+    constexpr int B[4] = {1,3,4,6};   // slots in tetrad B
+    // maps piece‑label → index 0–3 within its tetrad
+    // (only valid on the two labels in each group)
+    __device__ static const int mapA[8] = { 0,-1, 1,-1,-1, 2,-1, 3 };
+    __device__ static const int mapB[8] = {-1, 0,-1, 1, 2,-1, 3,-1 };
+
+    // helper to test one tetrad
+    auto test = [&](const int slots[4], const int map[8]) {
+        int perm[4];
+        #pragma unroll
+        for(int i=0;i<4;i++){
+            int slot = slots[i];
+            int piece = (cp>>(3*slot)) & 0x7;
+            perm[i] = map[piece];
+        }
+        bool seen[4] = {false,false,false,false};
+        int sum = 0;
+        for(int i=0;i<4;i++){
+            if (!seen[i]) {
+                int len = 0, j = i;
+                do {
+                    seen[j] = true;
+                    j = perm[j];
+                    ++len;
+                } while(!seen[j]);
+                sum += len - 1;
+            }
+        }
+        return (sum % 3) == 0;
+    };
+
+    // both tetrads must have zero total twist
+    return test(A,mapA) && test(B,mapB);
+}
+
 // brute‑force kernel
 __global__ void bruteForceStage3Kernel(
     CPState    startCP,
@@ -125,7 +179,9 @@ __global__ void bruteForceStage3Kernel(
     // check M‑slice, S‑slice, and triad‑membership
     if ((mMask & targetMSliceMask) == targetMSliceMask &&
         (sMask & targetSSliceMask) == targetSSliceMask &&
-         inTriads(cp))
+         inTriads(cp) &&
+         cornerParityEven(cp) &&
+         tetradTwistZero(cp))
     {
         if (atomicExch(solutionFoundFlag, 1) == 0) {
             for (int i = 0; i < depth; ++i)

@@ -173,49 +173,6 @@ int main() {
     }
     std::cout << "\n\n";
 
-    // ——— DEBUG DUMP ———
-    // human‑readable names for each slot
-    const char* cornerNames[8] = {
-        "URF","UFL","ULB","UBR",
-        "DFR","DLF","DBL","DRB"
-    };
-    const char* edgeNames[12] = {
-        "UR","UF","UL","UB",
-        "DR","DF","DL","DB",
-        "FR","FL","BL","BR"
-    };
-
-    std::cout << "State after scramble:\n";
-    std::cout << " Corners:\n";
-    for (int slot = 0; slot < 8; ++slot) {
-        u64 packed = (cornerState >> (5*slot)) & 0x1F;
-        int piece = packed & 0x7;
-        int ori   = (packed >> 3) & 0x3;
-        std::cout
-            << "  slot " << slot
-            << " (" << cornerNames[slot] << "): "
-            << "piece=" << piece
-            << " (" << cornerNames[piece] << ")"
-            << ", ori=" << ori
-            << "\n";
-    }
-
-    std::cout << " Edges:\n";
-    for (int slot = 0; slot < 12; ++slot) {
-        u64 packed = (edgeState >> (5*slot)) & 0x1F;
-        int piece = packed & 0xF;
-        int ori   = (packed >> 4) & 0x1;
-        std::cout
-            << "  slot " << slot
-            << " (" << edgeNames[slot] << "): "
-            << "piece=" << piece
-            << " (" << edgeNames[piece] << ")"
-            << ", ori=" << ori
-            << "\n";
-    }
-    std::cout << "\n";
-    // ——— END DEBUG DUMP ———
-
     // 4‑stage solver
     std::vector<std::string> totalSolution;
 
@@ -227,6 +184,7 @@ int main() {
         totalSolution.push_back(mv);
         applyRawMoveCPU(cornerState, edgeState, parseMoveToken(mv));
     }
+    std::cout << "\nLength: " << st1.size() << "\n";
     std::cout << "\n\n";
 
     // Stage 2
@@ -237,6 +195,7 @@ int main() {
         totalSolution.push_back(mv);
         applyRawMoveCPU(cornerState, edgeState, parseMoveToken(mv));
     }
+    std::cout << "\nLength: " << st2.size() << "\n";
     std::cout << "\n\n";
 
     // Stage 3
@@ -247,17 +206,19 @@ int main() {
         totalSolution.push_back(mv);
         applyRawMoveCPU(cornerState, edgeState, parseMoveToken(mv));
     }
+    std::cout << "\nLength: " << st3.size() << "\n";
     std::cout << "\n\n";
 
     // Stage 4
-    //auto st4 = solveStage4(cornerState, edgeState);
-    std::vector<std::string> st4 = {};
+    auto st4 = solveStage4(cornerState, edgeState);
+    //std::vector<std::string> st4 = {};
     std::cout << "Stage 4 solution:";
     for (auto& mv : st4) {
         std::cout << " " << mv;
         totalSolution.push_back(mv);
         applyRawMoveCPU(cornerState, edgeState, parseMoveToken(mv));
     }
+    std::cout << "\nLength: " << st4.size() << "\n";
     std::cout << "\n\n";
 
     // Print the complete solution
@@ -265,6 +226,7 @@ int main() {
     for (auto& mv : totalSolution) {
         std::cout << " " << mv;
     }
+    std::cout << "\nLength: " << totalSolution.size() << "\n";
     std::cout << "\n";
 
     return 0;
