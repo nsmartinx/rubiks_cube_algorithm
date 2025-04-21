@@ -47,7 +47,7 @@ __device__ __constant__ int ePerm[18][12] = {
 __device__ __constant__ ESState targetMSliceMask = (1<<0)|(1<<2)|(1<<4)|(1<<6);
 __device__ __constant__ ESState targetSSliceMask = (1<<1)|(1<<3)|(1<<5)|(1<<7);
 
-// apply corner‐perm (ignore orientation)
+// apply corner‑perm (ignore orientation)
 __device__ CPState applyCPMoveGPU(CPState s, int m) {
     CPState t = 0;
     for (int dst = 0; dst < 8; ++dst) {
@@ -58,7 +58,7 @@ __device__ CPState applyCPMoveGPU(CPState s, int m) {
     return t;
 }
 
-// apply a 1‑bit slice‐mask move
+// apply a 1‑bit slice‑mask move
 __device__ ESState applySliceMoveGPU(ESState s, int m) {
     ESState t = 0;
     for (int dst = 0; dst < 12; ++dst) {
@@ -68,21 +68,26 @@ __device__ ESState applySliceMoveGPU(ESState s, int m) {
     }
     return t;
 }
-__device__ ESState applyMSMoveGPU(ESState s, int m) { return applySliceMoveGPU(s,m); }
-__device**__device__** ESState applySSliceMoveGPU(ESState s, int m) { return applySliceMoveGPU(s,m); }
 
-// triad‐membership test: slot↔piece both in {0,3,4,7} or both in {1,2,5,6}
+__device__ ESState applyMSMoveGPU(ESState s, int m) {
+    return applySliceMoveGPU(s, m);
+}
+__device__ ESState applySSliceMoveGPU(ESState s, int m) {
+    return applySliceMoveGPU(s, m);
+}
+
+// triad‑membership test: each corner slot and its piece both lie in {0,3,4,7} or both in {1,2,5,6}
 __device__ bool inTriads(CPState cp) {
     for (int slot = 0; slot < 8; ++slot) {
         int piece = (cp >> (3*slot)) & 0x7;
-        bool slotA = (slot==0||slot==3||slot==4||slot==7);
-        bool pieceA= (piece==0||piece==3||piece==4||piece==7);
+        bool slotA  = (slot==0||slot==3||slot==4||slot==7);
+        bool pieceA = (piece==0||piece==3||piece==4||piece==7);
         if (slotA != pieceA) return false;
     }
     return true;
 }
 
-// brute‐force kernel
+// brute‑force kernel
 __global__ void bruteForceStage3Kernel(
     CPState    startCP,
     ESState    startM,
@@ -105,9 +110,9 @@ __global__ void bruteForceStage3Kernel(
     int prevFace = -1;
 
     for (int d = 0; d < depth; ++d) {
-        int sel = code % 14;  code /= 14;
-        int m   = allowedMoves[sel];
-        int face = m/3;
+        int sel  = code % 14;  code /= 14;
+        int m    = allowedMoves[sel];
+        int face = m / 3;
         if (face == prevFace) return;
         prevFace = face;
 
@@ -117,7 +122,7 @@ __global__ void bruteForceStage3Kernel(
         sMask    = applySSliceMoveGPU(sMask, m);
     }
 
-    // check M‑slice, S‑slice, and triad‐membership
+    // check M‑slice, S‑slice, and triad‑membership
     if ((mMask & targetMSliceMask) == targetMSliceMask &&
         (sMask & targetSSliceMask) == targetSSliceMask &&
          inTriads(cp))
@@ -130,32 +135,32 @@ __global__ void bruteForceStage3Kernel(
 }
 
 std::vector<std::string> solveStage3(u64 cornerState, u64 edgeState) {
-    // pack corner‐permutation into 3 bits per slot
+    // 1) pack corner‑permutation into 3 bits/slot
     CPState startCP = 0;
     for (int i = 0; i < 8; ++i) {
         int piece = (cornerState >> (5*i)) & 0x7;
         startCP  |= CPState(piece) << (3*i);
     }
 
-    // pack M‑slice & S‑slice membership
-    ESState startM=0, startS=0;
+    // 2) pack M‑slice & S‑slice membership
+    ESState startM = 0, startS = 0;
     for (int i = 0; i < 12; ++i) {
         int piece = (edgeState >> (5*i)) & 0x1F;
         bool inM   = (piece==0||piece==2||piece==4||piece==6);
         bool inS   = (piece==1||piece==3||piece==5||piece==7);
-        startM    |= ESState(inM) << i;
-        startS    |= ESState(inS) << i;
+        startM |= ESState(inM) << i;
+        startS |= ESState(inS) << i;
     }
 
-    // allocate GPU buffers
+    // 3) alloc GPU buffers
     int *d_sol, *d_flag;
     cudaMalloc(&d_sol,  sizeof(int)*MAX_STAGE3_DEPTH);
     cudaMalloc(&d_flag, sizeof(int));
     int zero = 0;
     cudaMemcpy(d_flag, &zero, sizeof(zero), cudaMemcpyHostToDevice);
 
-    // iterative deepening
-    int hostSol[MAX_STAGE3_DEPTH], foundDepth=0;
+    // 4) iterative‑deepening search
+    int hostSol[MAX_STAGE3_DEPTH], foundDepth = 0;
     auto t0 = std::chrono::steady_clock::now();
     for (int depth = 1; depth <= MAX_STAGE3_DEPTH; ++depth) {
         unsigned long long total = 1;
@@ -169,7 +174,7 @@ std::vector<std::string> solveStage3(u64 cornerState, u64 edgeState) {
         );
         cudaDeviceSynchronize();
 
-        int found=0;
+        int found = 0;
         cudaMemcpy(&found, d_flag, sizeof(found), cudaMemcpyDeviceToHost);
         if (found) {
             foundDepth = depth;
@@ -180,12 +185,12 @@ std::vector<std::string> solveStage3(u64 cornerState, u64 edgeState) {
     auto t1 = std::chrono::steady_clock::now();
     std::cout << "Stage 3 solved in "
               << std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count()
-              << " ms\n";
+              << " ms\n";
 
     cudaFree(d_sol);
     cudaFree(d_flag);
 
-    // map move‐indices back to notation
+    // 5) map move‑indices back to notation
     static const char* names[18] = {
       "U","U2","U'", "R","R2","R'", "F","F2","F'",
       "D","D2","D'", "L","L2","L'", "B","B2","B'"
