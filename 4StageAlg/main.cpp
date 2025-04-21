@@ -7,7 +7,7 @@ using u64 = uint64_t;
 
 // Forward declarations of our four stage solvers.
 std::vector<std::string> solveStage1(u64 edgeState);
-std::vector<std::string> solveStage2(u64 cornerState);
+std::vector<std::string> solveStage2(u64 cornerState, u64 edgeState);
 std::vector<std::string> solveStage3(u64 cornerState, u64 edgeState);
 std::vector<std::string> solveStage4(u64 cornerState, u64 edgeState);
 
@@ -230,7 +230,7 @@ int main() {
     std::cout << "\n\n";
 
     // Stage 2
-    auto st2 = solveStage2(cornerState);
+    auto st2 = solveStage2(cornerState, edgeState);
     std::cout << "Stage 2 solution:";
     for (auto& mv : st2) {
         std::cout << " " << mv;
@@ -250,7 +250,8 @@ int main() {
     std::cout << "\n\n";
 
     // Stage 4
-    auto st4 = solveStage4(cornerState, edgeState);
+    //auto st4 = solveStage4(cornerState, edgeState);
+    std::vector<std::string> st4 = {};
     std::cout << "Stage 4 solution:";
     for (auto& mv : st4) {
         std::cout << " " << mv;
