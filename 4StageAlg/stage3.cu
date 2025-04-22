@@ -76,17 +76,6 @@ __device__ ESState applySSliceMoveGPU(ESState s, int m) {
     return applySliceMoveGPU(s, m);
 }
 
-// triad‑membership test: each corner slot and its piece both lie in {0,3,4,7} or both in {1,2,5,6}
-__device__ bool inTriads(CPState cp) {
-    for (int slot = 0; slot < 8; ++slot) {
-        int piece = (cp >> (3*slot)) & 0x7;
-        bool slotA  = (slot==0||slot==2||slot==5||slot==7);
-        bool pieceA = (piece==0||piece==2||piece==5||piece==7);
-        if (slotA != pieceA) return false;
-    }
-    return true;
-}
-
 // in your __device__ section:
 __device__ bool cornerParityEven(CPState cp) {
     // unpack into a small array
@@ -103,42 +92,14 @@ __device__ bool cornerParityEven(CPState cp) {
     return inv == 0;
 }
 
-__device__ bool tetradTwistZero(CPState cp) {
-    // the two tetrads (these are the same groups used by inTriads):
-    constexpr int A[4] = {0,2,5,7};   // slots in tetrad A
-    constexpr int B[4] = {1,3,4,6};   // slots in tetrad B
-    // maps piece‑label → index 0–3 within its tetrad
-    // (only valid on the two labels in each group)
-    __device__ static const int mapA[8] = { 0,-1, 1,-1,-1, 2,-1, 3 };
-    __device__ static const int mapB[8] = {-1, 0,-1, 1, 2,-1, 3,-1 };
-
-    // helper to test one tetrad
-    auto test = [&](const int slots[4], const int map[8]) {
-        int perm[4];
-        #pragma unroll
-        for(int i=0;i<4;i++){
-            int slot = slots[i];
-            int piece = (cp>>(3*slot)) & 0x7;
-            perm[i] = map[piece];
-        }
-        bool seen[4] = {false,false,false,false};
-        int sum = 0;
-        for(int i=0;i<4;i++){
-            if (!seen[i]) {
-                int len = 0, j = i;
-                do {
-                    seen[j] = true;
-                    j = perm[j];
-                    ++len;
-                } while(!seen[j]);
-                sum += len - 1;
-            }
-        }
-        return (sum % 3) == 0;
-    };
-
-    // both tetrads must have zero total twist
-    return test(A,mapA) && test(B,mapB);
+__device__ bool cornerPairGroupsOK(CPState cp) {
+    unsigned acc = 0;
+    #pragma unroll
+    for (int slot = 0; slot < 8; ++slot) {
+        int piece  = (cp >> (3*slot)) & 0x7;
+        acc |= ((piece ^ slot) & 5);
+    }
+    return acc == 0;
 }
 
 // brute‑force kernel
@@ -179,9 +140,9 @@ __global__ void bruteForceStage3Kernel(
     // check M‑slice, S‑slice, and triad‑membership
     if ((mMask & targetMSliceMask) == targetMSliceMask &&
         (sMask & targetSSliceMask) == targetSSliceMask &&
-         inTriads(cp) &&
          cornerParityEven(cp) &&
-         tetradTwistZero(cp))
+         cornerPairGroupsOK(cp)
+        )
     {
         if (atomicExch(solutionFoundFlag, 1) == 0) {
             for (int i = 0; i < depth; ++i)

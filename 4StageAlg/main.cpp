@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <sstream>
 
 using u64 = uint64_t;
 
@@ -146,6 +147,15 @@ void applyRawMoveCPU(u64 & cornerState, u64 & edgeState, int moveIndex) {
     edgeState   = newE;
 }
 
+std::vector<std::string> split(const std::string& input) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(input);
+    std::string token;
+    while (iss >> token) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
 
 int main() {
     // 1) Hardcoded scramble:
@@ -154,6 +164,9 @@ int main() {
         "L'","U'","F'","L2","B2","F'","L2","B'",
         "U","B","F2","L2","B2","F'","L2","R'","U'"
     };
+    //std::vector<std::string> scramble = split("B2 R D' R2 D' L' B2 R' F B2 R L2 D2 R' F' B R2 D' U2 F L2 R2 F' D' L2 ");
+    //std::vector<std::string> scramble = split("U R D2 U2 F2 L2 F' L' D' R' U' F' D U F' R B2 U' D' R' D' L' D' B' F");
+    //std::vector<std::string> scramble = split("R B R2 L' F2 U' L' U' B' F' L2 F2 B D B R B R D U B' F2 U2 F D2 ");
 
     // 2) Initialize to solved cube
     u64 cornerState = 0, edgeState = 0;
@@ -221,13 +234,47 @@ int main() {
     std::cout << "\nLength: " << st4.size() << "\n";
     std::cout << "\n\n";
 
-    // Print the complete solution
+    std::vector<std::string> simplified;
+    char lastFace = 0;
+    int acc = 0;  // accumulated quarter‐turns: 1=90°, 2=180°, 3=270°
+
+    // helper to flush the accumulator into simplified[]
+    auto flush = [&]() {
+        if (lastFace == 0) return;
+        int r = acc % 4;
+        if (r < 0) r += 4;
+        if (r == 1)      simplified.push_back(std::string(1, lastFace));
+        else if (r == 2) simplified.push_back(std::string(1, lastFace) + "2");
+        else if (r == 3) simplified.push_back(std::string(1, lastFace) + "'");
+        // else r==0 → no move (cancels out)
+        lastFace = 0;
+        acc = 0;
+    };
+
+    // walk through totalSolution
+    for (auto &mv : totalSolution) {
+        char f = mv[0];
+        int v = 1;
+        if (mv.size() == 2) {
+            v = (mv[1] == '2' ? 2 : 3);  // '2'→2, '\''→3
+        }
+        if (f != lastFace) {
+            // new face: flush previous, start anew
+            flush();
+            lastFace = f;
+            acc = v;
+        } else {
+            // same face: accumulate
+            acc = (acc + v) % 4;
+        }
+    }
+    flush();
+
     std::cout << "Full solution:";
-    for (auto& mv : totalSolution) {
+    for (auto &mv : simplified) {
         std::cout << " " << mv;
     }
-    std::cout << "\nLength: " << totalSolution.size() << "\n";
-    std::cout << "\n";
+    std::cout << "\nLength: " << simplified.size() << "\n";
 
     return 0;
 
