@@ -12,11 +12,11 @@ using u16 = uint16_t;
 #define STAGE3_MAX_DEPTH 13
 
 // Device constant: allowed Thistlethwaite G2 moves
-__device__ __constant__ int deviceAllowedMoves[14] = {
+__device__ __constant__ int deviceAllowedMoves[10] = {
     0,1,2,   // U, U2, U'
-    3,4,5,   // R, R2, R'
+    4,       // R2
     9,10,11, // D, D2, D'
-    12,13,14,// L, L2, L'
+    13,      // L2
     7,       // F2
     16       // B2
 };
@@ -41,9 +41,8 @@ __device__ __constant__ int edgePermutation[18][12] = {
     {0,1,2,11,4,5,6,10,8,9,3,7}, {0,1,2,7,4,5,6,3,8,9,11,10}, {0,1,2,10,4,5,6,11,8,9,7,3} // B,B2,B'
 };
 
-// Device constant: target masks for middle- and side-slice
+// Device constant: target mask for middle-slice
 __device__ __constant__ u16 targetMiddleSliceMask = 0b000001010101;
-__device__ __constant__ u16 targetSideSliceMask   = 0b000010101010;
 
 // Apply corner-permutation move (ignore orientation)
 __device__ u32 applyCornerPermutationMoveGpu(u32 state, int moveIndex) {
@@ -65,14 +64,6 @@ __device__ u16 applyEdgeSliceMoveGpu(u16 state, int moveIndex) {
         result |= bit << dest;
     }
     return result;
-}
-
-// Aliases for middle- and side-slice moves
-__device__ u16 applyMiddleSliceMoveGpu(u16 state, int moveIndex) {
-    return applyEdgeSliceMoveGpu(state, moveIndex);
-}
-__device__ u16 applySideSliceMoveGpu(u16 state, int moveIndex) {
-    return applyEdgeSliceMoveGpu(state, moveIndex);
 }
 
 // Check if corner permutation has even parity
@@ -107,36 +98,37 @@ __device__ bool areCornerPairGroupsValid(u32 cornerState) {
 __global__ void bruteForceStage3Kernel(
     u32 startCornerState,
     u16 startMiddleSliceState,
-    u16 startSideSliceState,
     int searchDepth,
     int *d_solutionMoveBuffer,
     int *d_solutionFoundFlag
 ) {
     unsigned long long threadIndex = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned long long totalSequences = 1ULL;
-    for (int i = 0; i < searchDepth; ++i) totalSequences *= 14ULL;
+
+    for (int i = 0; i < searchDepth; ++i) totalSequences *= 10ULL;
     if (threadIndex >= totalSequences) return;
+
     u32 cornerState = startCornerState;
     u16 middleSliceState = startMiddleSliceState;
-    u16 sideSliceState = startSideSliceState;
+
     int localMoveSequence[STAGE3_MAX_DEPTH];
     unsigned long long sequenceCode = threadIndex;
     int previousFaceIndex = -1;
+
     for (int step = 0; step < searchDepth; ++step) {
-        int selectionIndex = sequenceCode % 14;
-        sequenceCode /= 14;
+        int selectionIndex = sequenceCode % 10;
+        sequenceCode /= 10;
         int moveIndex = deviceAllowedMoves[selectionIndex];
         int faceIndex = moveIndex / 3;
         if (faceIndex == previousFaceIndex) return;
         previousFaceIndex = faceIndex;
         localMoveSequence[step] = moveIndex;
         cornerState = applyCornerPermutationMoveGpu(cornerState, moveIndex);
-        middleSliceState = applyMiddleSliceMoveGpu(middleSliceState, moveIndex);
-        sideSliceState = applySideSliceMoveGpu(sideSliceState, moveIndex);
+        middleSliceState = applyEdgeSliceMoveGpu(middleSliceState, moveIndex);
     }
+
     bool middleSliceCorrect = (middleSliceState & targetMiddleSliceMask) == targetMiddleSliceMask;
-    bool sideSliceCorrect = (sideSliceState & targetSideSliceMask) == targetSideSliceMask;
-    if (middleSliceCorrect && sideSliceCorrect
+    if (middleSliceCorrect
         && isCornerParityEven(cornerState)
         && areCornerPairGroupsValid(cornerState)) {
         if (atomicExch(d_solutionFoundFlag, 1) == 0) {
@@ -154,15 +146,14 @@ std::vector<std::string> solveStage3(u64 packedCornerState, u64 packedEdgeState)
         u32 piece = (packedCornerState >> (5 * i)) & 7u;
         h_initialCornerState |= piece << (3 * i);
     }
+
     u16 h_initialMiddleSliceState = 0;
-    u16 h_initialSideSliceState = 0;
     for (int i = 0; i < 12; ++i) {
         u32 piece = (packedEdgeState >> (5 * i)) & 31u;
         bool inMiddle = (piece == 0 || piece == 2 || piece == 4 || piece == 6);
-        bool inSide = (piece == 1 || piece == 3 || piece == 5 || piece == 7);
         h_initialMiddleSliceState |= u16(inMiddle) << i;
-        h_initialSideSliceState |= u16(inSide) << i;
     }
+
     int *d_solutionMoveBuffer;
     int *d_solutionFoundFlag;
     cudaMalloc(&d_solutionMoveBuffer, sizeof(int) * STAGE3_MAX_DEPTH);
@@ -172,15 +163,15 @@ std::vector<std::string> solveStage3(u64 packedCornerState, u64 packedEdgeState)
     int h_solutionMoveIndices[STAGE3_MAX_DEPTH] = {0};
     int h_solutionDepthFound = 0;
     auto h_searchStartTime = std::chrono::steady_clock::now();
+
     for (int depth = 1; depth <= STAGE3_MAX_DEPTH; ++depth) {
         unsigned long long totalSequences = 1ULL;
-        for (int i = 0; i < depth; ++i) totalSequences *= 14ULL;
+        for (int i = 0; i < depth; ++i) totalSequences *= 10ULL;
         int threadsPerBlock = 256;
         int blockCount = (totalSequences + threadsPerBlock - 1) / threadsPerBlock;
         bruteForceStage3Kernel<<<blockCount, threadsPerBlock>>>(
             h_initialCornerState,
             h_initialMiddleSliceState,
-            h_initialSideSliceState,
             depth,
             d_solutionMoveBuffer,
             d_solutionFoundFlag
@@ -194,17 +185,20 @@ std::vector<std::string> solveStage3(u64 packedCornerState, u64 packedEdgeState)
             break;
         }
     }
+
     auto h_searchEndTime = std::chrono::steady_clock::now();
-    auto h_elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        h_searchEndTime - h_searchStartTime).count();
+    auto h_elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(h_searchEndTime - h_searchStartTime).count();
+
     std::cout << "Stage 3 (Double Move Reduction) solved in " << h_elapsedMs << " ms\n";
     cudaFree(d_solutionMoveBuffer);
     cudaFree(d_solutionFoundFlag);
+
     static const char* moveNameList[18] = {
         "U","U2","U'","R","R2","R'",
         "F","F2","F'","D","D2","D'",
         "L","L2","L'","B","B2","B'"
     };
+
     std::vector<std::string> h_solutionMoves;
     h_solutionMoves.reserve(h_solutionDepthFound);
     for (int i = 0; i < h_solutionDepthFound; ++i) {
