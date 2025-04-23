@@ -42,7 +42,7 @@ __device__ __constant__ int edgePermutation[18][12] = {
 };
 
 // Device constant: target mask for middle-slice
-__device__ __constant__ u16 targetMiddleSliceMask = 0b000001010101;
+__device__ __constant__ u16 targetMiddleSliceMask = 0b0000'0101'0101;
 
 // Apply corner-permutation move (ignore orientation)
 __device__ u32 applyCornerPermutationMoveGpu(u32 state, int moveIndex) {
@@ -56,7 +56,7 @@ __device__ u32 applyCornerPermutationMoveGpu(u32 state, int moveIndex) {
 }
 
 // Apply an edge-slice move (1 bit per edge)
-__device__ u16 applyEdgeSliceMoveGpu(u16 state, int moveIndex) {
+__device__ u16 applyEdgeMoveGpu(u16 state, int moveIndex) {
     u16 result = 0;
     for (int dest = 0; dest < 12; ++dest) {
         int src = edgePermutation[moveIndex][dest];
@@ -124,7 +124,7 @@ __global__ void bruteForceStage3Kernel(
         previousFaceIndex = faceIndex;
         localMoveSequence[step] = moveIndex;
         cornerState = applyCornerPermutationMoveGpu(cornerState, moveIndex);
-        middleSliceState = applyEdgeSliceMoveGpu(middleSliceState, moveIndex);
+        middleSliceState = applyEdgeMoveGpu(middleSliceState, moveIndex);
     }
 
     bool middleSliceCorrect = (middleSliceState & targetMiddleSliceMask) == targetMiddleSliceMask;
