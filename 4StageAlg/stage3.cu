@@ -5,216 +5,210 @@
 #include <iostream>
 #include <cuda_runtime.h>
 
-using u64     = uint64_t;
-// pack 8 corners ×3 bits = 24 bits
-using CPState = uint32_t;
-// pack 12 edges ×1 bit  = 12 bits
-using ESState = uint16_t;
+using u64 = uint64_t;
+using u32 = uint32_t;
+using u16 = uint16_t;
 
-#define MAX_STAGE3_DEPTH 13
+#define STAGE3_MAX_DEPTH 13
 
-// —— G₂ moves: preserve EO, CO, E‑slice —— 
-__device__ __constant__ int allowedMoves[14] = {
-    0,1,2,    // U, U2, U'
-    3,4,5,    // R, R2, R'
-    9,10,11,  // D, D2, D'
-    12,13,14, // L, L2, L'
-    7,        // F2
-    16        // B2
+// Device constant: allowed Thistlethwaite G2 moves
+__device__ __constant__ int deviceAllowedMoves[14] = {
+    0,1,2,   // U, U2, U'
+    3,4,5,   // R, R2, R'
+    9,10,11, // D, D2, D'
+    12,13,14,// L, L2, L'
+    7,       // F2
+    16       // B2
 };
 
-// dst→src corner perm  
-__device__ __constant__ int coPerm[18][8] = {
-  {3,0,1,2,4,5,6,7},{2,3,0,1,4,5,6,7},{1,2,3,0,4,5,6,7},
-  {4,1,2,0,7,5,6,3},{7,1,2,4,3,5,6,0},{3,1,2,7,0,5,6,4},
-  {1,5,2,3,0,4,6,7},{5,4,2,3,1,0,6,7},{4,0,2,3,5,1,6,7},
-  {0,1,2,3,5,6,7,4},{0,1,2,3,6,7,4,5},{0,1,2,3,7,4,5,6},
-  {0,2,6,3,4,1,5,7},{0,6,5,3,4,2,1,7},{0,5,1,3,4,6,2,7},
-  {0,1,3,7,4,5,2,6},{0,1,7,6,4,5,3,2},{0,1,6,2,4,5,7,3}
+// Device constant: corner permutation for each move (dest to src)
+__device__ __constant__ int cornerPermutation[18][8] = {
+    {3,0,1,2,4,5,6,7}, {2,3,0,1,4,5,6,7}, {1,2,3,0,4,5,6,7}, // U,U2,U'
+    {4,1,2,0,7,5,6,3}, {7,1,2,4,3,5,6,0}, {3,1,2,7,0,5,6,4}, // R,R2,R'
+    {1,5,2,3,0,4,6,7}, {5,4,2,3,1,0,6,7}, {4,0,2,3,5,1,6,7}, // F,F2,F'
+    {0,1,2,3,5,6,7,4}, {0,1,2,3,6,7,4,5}, {0,1,2,3,7,4,5,6}, // D,D2,D'
+    {0,2,6,3,4,1,5,7}, {0,6,5,3,4,2,1,7}, {0,5,1,3,4,6,2,7}, // L,L2,L'
+    {0,1,3,7,4,5,2,6}, {0,1,7,6,4,5,3,2}, {0,1,6,2,4,5,7,3}  // B,B2,B'
 };
 
-// dst→src edge perm  
-__device__ __constant__ int ePerm[18][12] = {
-  {3,0,1,2,4,5,6,7,8,9,10,11},{2,3,0,1,4,5,6,7,8,9,10,11},{1,2,3,0,4,5,6,7,8,9,10,11},
-  {8,1,2,3,11,5,6,7,4,9,10,0},{4,1,2,3,0,5,6,7,11,9,10,8},{11,1,2,3,8,5,6,7,0,9,10,4},
-  {0,9,2,3,4,8,6,7,1,5,10,11},{0,5,2,3,4,1,6,7,9,8,10,11},{0,8,2,3,4,9,6,7,5,1,10,11},
-  {0,1,2,3,5,6,7,4,8,9,10,11},{0,1,2,3,6,7,4,5,8,9,10,11},{0,1,2,3,7,4,5,6,8,9,10,11},
-  {0,1,10,3,4,5,9,7,8,2,6,11},{0,1,6,3,4,5,2,7,8,10,9,11},{0,1,9,3,4,5,10,7,8,6,2,11},
-  {0,1,2,11,4,5,6,10,8,9,3,7},{0,1,2,7,4,5,6,3,8,9,11,10},{0,1,2,10,4,5,6,11,8,9,7,3}
+// Device constant: edge permutation for each move (dest to src)
+__device__ __constant__ int edgePermutation[18][12] = {
+    {3,0,1,2,4,5,6,7,8,9,10,11}, {2,3,0,1,4,5,6,7,8,9,10,11}, {1,2,3,0,4,5,6,7,8,9,10,11}, // U,U2,U'
+    {8,1,2,3,11,5,6,7,4,9,10,0}, {4,1,2,3,0,5,6,7,11,9,10,8}, {11,1,2,3,8,5,6,7,0,9,10,4}, // R,R2,R'
+    {0,9,2,3,4,8,6,7,1,5,10,11}, {0,5,2,3,4,1,6,7,9,8,10,11}, {0,8,2,3,4,9,6,7,5,1,10,11}, // F,F2,F'
+    {0,1,2,3,5,6,7,4,8,9,10,11}, {0,1,2,3,6,7,4,5,8,9,10,11}, {0,1,2,3,7,4,5,6,8,9,10,11}, // D,D2,D'
+    {0,1,10,3,4,5,9,7,8,2,6,11}, {0,1,6,3,4,5,2,7,8,10,9,11}, {0,1,9,3,4,5,10,7,8,6,2,11}, // L,L2,L'
+    {0,1,2,11,4,5,6,10,8,9,3,7}, {0,1,2,7,4,5,6,3,8,9,11,10}, {0,1,2,10,4,5,6,11,8,9,7,3} // B,B2,B'
 };
 
-// bit‑masks for checking slices
-__device__ __constant__ ESState targetMSliceMask = (1<<0)|(1<<2)|(1<<4)|(1<<6);
-__device__ __constant__ ESState targetSSliceMask = (1<<1)|(1<<3)|(1<<5)|(1<<7);
+// Device constant: target masks for middle- and side-slice
+__device__ __constant__ u16 targetMiddleSliceMask = 0b000001010101;
+__device__ __constant__ u16 targetSideSliceMask   = 0b000010101010;
 
-// apply corner‑perm (ignore orientation)
-__device__ CPState applyCPMoveGPU(CPState s, int m) {
-    CPState t = 0;
-    for (int dst = 0; dst < 8; ++dst) {
-        int src = coPerm[m][dst];
-        CPState c = (s >> (3*src)) & 0x7;
-        t |= c << (3*dst);
+// Apply corner-permutation move (ignore orientation)
+__device__ u32 applyCornerPermutationMoveGpu(u32 state, int moveIndex) {
+    u32 result = 0;
+    for (int dest = 0; dest < 8; ++dest) {
+        int src = cornerPermutation[moveIndex][dest];
+        u32 piece = (state >> (3 * src)) & 7u;
+        result |= piece << (3 * dest);
     }
-    return t;
+    return result;
 }
 
-// apply a 1‑bit slice‑mask move
-__device__ ESState applySliceMoveGPU(ESState s, int m) {
-    ESState t = 0;
-    for (int dst = 0; dst < 12; ++dst) {
-        int src    = ePerm[m][dst];
-        ESState bit = (s >> src) & 1;
-        t |= bit << dst;
+// Apply an edge-slice move (1 bit per edge)
+__device__ u16 applyEdgeSliceMoveGpu(u16 state, int moveIndex) {
+    u16 result = 0;
+    for (int dest = 0; dest < 12; ++dest) {
+        int src = edgePermutation[moveIndex][dest];
+        u16 bit = (state >> src) & 1u;
+        result |= bit << dest;
     }
-    return t;
+    return result;
 }
 
-__device__ ESState applyMSMoveGPU(ESState s, int m) {
-    return applySliceMoveGPU(s, m);
+// Aliases for middle- and side-slice moves
+__device__ u16 applyMiddleSliceMoveGpu(u16 state, int moveIndex) {
+    return applyEdgeSliceMoveGpu(state, moveIndex);
 }
-__device__ ESState applySSliceMoveGPU(ESState s, int m) {
-    return applySliceMoveGPU(s, m);
+__device__ u16 applySideSliceMoveGpu(u16 state, int moveIndex) {
+    return applyEdgeSliceMoveGpu(state, moveIndex);
 }
 
-// in your __device__ section:
-__device__ bool cornerParityEven(CPState cp) {
-    // unpack into a small array
-    int c[8];
+// Check if corner permutation has even parity
+__device__ bool isCornerParityEven(u32 cornerState) {
+    int corners[8];
     #pragma unroll
-    for (int i = 0; i < 8; ++i)
-        c[i] = (cp >> (3*i)) & 0x7;
-    // count inversions mod 2
-    int inv = 0;
+    for (int i = 0; i < 8; ++i) {
+        corners[i] = (cornerState >> (3 * i)) & 7u;
+    }
+    int inversionCount = 0;
     #pragma unroll
-    for (int i = 0; i < 8; ++i)
-        for (int j = i+1; j < 8; ++j)
-            inv ^= (c[i] > c[j]);
-    return inv == 0;
+    for (int i = 0; i < 8; ++i) {
+        for (int j = i + 1; j < 8; ++j) {
+            inversionCount ^= (corners[i] > corners[j]);
+        }
+    }
+    return inversionCount == 0;
 }
 
-__device__ bool cornerPairGroupsOK(CPState cp) {
-    unsigned acc = 0;
+// Verify corner pairing groups
+__device__ bool areCornerPairGroupsValid(u32 cornerState) {
+    unsigned maskAccumulator = 0;
     #pragma unroll
     for (int slot = 0; slot < 8; ++slot) {
-        int piece  = (cp >> (3*slot)) & 0x7;
-        acc |= ((piece ^ slot) & 5);
+        u32 piece = (cornerState >> (3 * slot)) & 7u;
+        maskAccumulator |= ((piece ^ slot) & 5u);
     }
-    return acc == 0;
+    return maskAccumulator == 0;
 }
 
-// brute‑force kernel
+// Kernel: brute-force search for stage 3 solution
 __global__ void bruteForceStage3Kernel(
-    CPState    startCP,
-    ESState    startM,
-    ESState    startS,
-    int        depth,
-    int       *solutionBuffer,
-    int       *solutionFoundFlag
+    u32 startCornerState,
+    u16 startMiddleSliceState,
+    u16 startSideSliceState,
+    int searchDepth,
+    int *d_solutionMoveBuffer,
+    int *d_solutionFoundFlag
 ) {
-    unsigned long long tid = blockIdx.x*blockDim.x + threadIdx.x;
-    // total = 14^depth
-    unsigned long long total = 1;
-    for (int i = 0; i < depth; ++i) total *= 14ULL;
-    if (tid >= total) return;
-
-    CPState cp    = startCP;
-    ESState mMask = startM;
-    ESState sMask = startS;
-    int seq[MAX_STAGE3_DEPTH];
-    unsigned long long code = tid;
-    int prevFace = -1;
-
-    for (int d = 0; d < depth; ++d) {
-        int sel  = code % 14;  code /= 14;
-        int m    = allowedMoves[sel];
-        int face = m / 3;
-        if (face == prevFace) return;
-        prevFace = face;
-
-        seq[d]   = m;
-        cp       = applyCPMoveGPU(cp, m);
-        mMask    = applyMSMoveGPU(mMask, m);
-        sMask    = applySSliceMoveGPU(sMask, m);
+    unsigned long long threadIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned long long totalSequences = 1ULL;
+    for (int i = 0; i < searchDepth; ++i) totalSequences *= 14ULL;
+    if (threadIndex >= totalSequences) return;
+    u32 cornerState = startCornerState;
+    u16 middleSliceState = startMiddleSliceState;
+    u16 sideSliceState = startSideSliceState;
+    int localMoveSequence[STAGE3_MAX_DEPTH];
+    unsigned long long sequenceCode = threadIndex;
+    int previousFaceIndex = -1;
+    for (int step = 0; step < searchDepth; ++step) {
+        int selectionIndex = sequenceCode % 14;
+        sequenceCode /= 14;
+        int moveIndex = deviceAllowedMoves[selectionIndex];
+        int faceIndex = moveIndex / 3;
+        if (faceIndex == previousFaceIndex) return;
+        previousFaceIndex = faceIndex;
+        localMoveSequence[step] = moveIndex;
+        cornerState = applyCornerPermutationMoveGpu(cornerState, moveIndex);
+        middleSliceState = applyMiddleSliceMoveGpu(middleSliceState, moveIndex);
+        sideSliceState = applySideSliceMoveGpu(sideSliceState, moveIndex);
     }
-
-    // check M‑slice, S‑slice, and triad‑membership
-    if ((mMask & targetMSliceMask) == targetMSliceMask &&
-        (sMask & targetSSliceMask) == targetSSliceMask &&
-         cornerParityEven(cp) &&
-         cornerPairGroupsOK(cp)
-        )
-    {
-        if (atomicExch(solutionFoundFlag, 1) == 0) {
-            for (int i = 0; i < depth; ++i)
-                solutionBuffer[i] = seq[i];
+    bool middleSliceCorrect = (middleSliceState & targetMiddleSliceMask) == targetMiddleSliceMask;
+    bool sideSliceCorrect = (sideSliceState & targetSideSliceMask) == targetSideSliceMask;
+    if (middleSliceCorrect && sideSliceCorrect
+        && isCornerParityEven(cornerState)
+        && areCornerPairGroupsValid(cornerState)) {
+        if (atomicExch(d_solutionFoundFlag, 1) == 0) {
+            for (int i = 0; i < searchDepth; ++i) {
+                d_solutionMoveBuffer[i] = localMoveSequence[i];
+            }
         }
     }
 }
 
-std::vector<std::string> solveStage3(u64 cornerState, u64 edgeState) {
-    // 1) pack corner‑permutation into 3 bits/slot
-    CPState startCP = 0;
+// Host: solve stage 3 using iterative deepening search on GPU
+std::vector<std::string> solveStage3(u64 packedCornerState, u64 packedEdgeState) {
+    u32 h_initialCornerState = 0;
     for (int i = 0; i < 8; ++i) {
-        int piece = (cornerState >> (5*i)) & 0x7;
-        startCP  |= CPState(piece) << (3*i);
+        u32 piece = (packedCornerState >> (5 * i)) & 7u;
+        h_initialCornerState |= piece << (3 * i);
     }
-
-    // 2) pack M‑slice & S‑slice membership
-    ESState startM = 0, startS = 0;
+    u16 h_initialMiddleSliceState = 0;
+    u16 h_initialSideSliceState = 0;
     for (int i = 0; i < 12; ++i) {
-        int piece = (edgeState >> (5*i)) & 0x1F;
-        bool inM   = (piece==0||piece==2||piece==4||piece==6);
-        bool inS   = (piece==1||piece==3||piece==5||piece==7);
-        startM |= ESState(inM) << i;
-        startS |= ESState(inS) << i;
+        u32 piece = (packedEdgeState >> (5 * i)) & 31u;
+        bool inMiddle = (piece == 0 || piece == 2 || piece == 4 || piece == 6);
+        bool inSide = (piece == 1 || piece == 3 || piece == 5 || piece == 7);
+        h_initialMiddleSliceState |= u16(inMiddle) << i;
+        h_initialSideSliceState |= u16(inSide) << i;
     }
-
-    // 3) alloc GPU buffers
-    int *d_sol, *d_flag;
-    cudaMalloc(&d_sol,  sizeof(int)*MAX_STAGE3_DEPTH);
-    cudaMalloc(&d_flag, sizeof(int));
-    int zero = 0;
-    cudaMemcpy(d_flag, &zero, sizeof(zero), cudaMemcpyHostToDevice);
-
-    // 4) iterative‑deepening search
-    int hostSol[MAX_STAGE3_DEPTH], foundDepth = 0;
-    auto t0 = std::chrono::steady_clock::now();
-    for (int depth = 1; depth <= MAX_STAGE3_DEPTH; ++depth) {
-        unsigned long long total = 1;
-        for (int i = 0; i < depth; ++i) total *= 14ULL;
-        int threads = 256;
-        int blocks  = int((total + threads - 1)/threads);
-
-        bruteForceStage3Kernel<<<blocks,threads>>>(
-            startCP, startM, startS, depth,
-            d_sol, d_flag
+    int *d_solutionMoveBuffer;
+    int *d_solutionFoundFlag;
+    cudaMalloc(&d_solutionMoveBuffer, sizeof(int) * STAGE3_MAX_DEPTH);
+    cudaMalloc(&d_solutionFoundFlag, sizeof(int));
+    int h_initialFlag = 0;
+    cudaMemcpy(d_solutionFoundFlag, &h_initialFlag, sizeof(h_initialFlag), cudaMemcpyHostToDevice);
+    int h_solutionMoveIndices[STAGE3_MAX_DEPTH] = {0};
+    int h_solutionDepthFound = 0;
+    auto h_searchStartTime = std::chrono::steady_clock::now();
+    for (int depth = 1; depth <= STAGE3_MAX_DEPTH; ++depth) {
+        unsigned long long totalSequences = 1ULL;
+        for (int i = 0; i < depth; ++i) totalSequences *= 14ULL;
+        int threadsPerBlock = 256;
+        int blockCount = (totalSequences + threadsPerBlock - 1) / threadsPerBlock;
+        bruteForceStage3Kernel<<<blockCount, threadsPerBlock>>>(
+            h_initialCornerState,
+            h_initialMiddleSliceState,
+            h_initialSideSliceState,
+            depth,
+            d_solutionMoveBuffer,
+            d_solutionFoundFlag
         );
         cudaDeviceSynchronize();
-
-        int found = 0;
-        cudaMemcpy(&found, d_flag, sizeof(found), cudaMemcpyDeviceToHost);
-        if (found) {
-            foundDepth = depth;
-            cudaMemcpy(hostSol, d_sol, sizeof(int)*depth, cudaMemcpyDeviceToHost);
+        int h_foundFlag = 0;
+        cudaMemcpy(&h_foundFlag, d_solutionFoundFlag, sizeof(h_foundFlag), cudaMemcpyDeviceToHost);
+        if (h_foundFlag) {
+            h_solutionDepthFound = depth;
+            cudaMemcpy(h_solutionMoveIndices, d_solutionMoveBuffer, sizeof(int) * depth, cudaMemcpyDeviceToHost);
             break;
         }
     }
-    auto t1 = std::chrono::steady_clock::now();
-    std::cout << "Stage 3 solved in "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count()
-              << " ms\n";
-
-    cudaFree(d_sol);
-    cudaFree(d_flag);
-
-    // 5) map move‑indices back to notation
-    static const char* names[18] = {
-      "U","U2","U'", "R","R2","R'", "F","F2","F'",
-      "D","D2","D'", "L","L2","L'", "B","B2","B'"
+    auto h_searchEndTime = std::chrono::steady_clock::now();
+    auto h_elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        h_searchEndTime - h_searchStartTime).count();
+    std::cout << "Stage 3 (Double Move Reduction) solved in " << h_elapsedMs << " ms\n";
+    cudaFree(d_solutionMoveBuffer);
+    cudaFree(d_solutionFoundFlag);
+    static const char* moveNameList[18] = {
+        "U","U2","U'","R","R2","R'",
+        "F","F2","F'","D","D2","D'",
+        "L","L2","L'","B","B2","B'"
     };
-    std::vector<std::string> sol;
-    sol.reserve(foundDepth);
-    for (int i = 0; i < foundDepth; ++i)
-        sol.emplace_back(names[hostSol[i]]);
-    return sol;
+    std::vector<std::string> h_solutionMoves;
+    h_solutionMoves.reserve(h_solutionDepthFound);
+    for (int i = 0; i < h_solutionDepthFound; ++i) {
+        h_solutionMoves.emplace_back(moveNameList[h_solutionMoveIndices[i]]);
+    }
+    return h_solutionMoves;
 }
