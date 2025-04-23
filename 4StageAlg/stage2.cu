@@ -1,3 +1,4 @@
+// stage2.cu
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -5,191 +6,199 @@
 #include <iostream>
 #include <cuda_runtime.h>
 
-using u64     = uint64_t;
-using COState = uint16_t;
-using ESState = uint16_t;
+using u64 = uint64_t;
+using u16 = uint16_t;
 
-#define MAX_SEARCH_DEPTH 10
+#define MAX_DEPTH_STAGE_2 10
 
-// —–– allowed Thistlethwaite G1 moves (preserves edge‐orientation) ——
-__device__ __constant__ int allowedMoves[14] = {
-    0,1,2,    // U U2 U'
-    3,4,5,    // R R2 R'
-    9,10,11,  // D D2 D'
-    12,13,14, // L L2 L'
-    7,        // F2  
-    16        // B2
+// Device constant: allowed Thistlethwaite G1 moves (preserves edge orientation)
+__device__ __constant__ int d_allowedMoves[14] = {
+    0, 1, 2,    // U, U2, U'
+    3, 4, 5,    // R, R2, R'
+    9, 10, 11,  // D, D2, D'
+    12, 13, 14, // L, L2, L'
+    7,          // F2
+    16          // B2
 };
 
-// src→dst corner permutation:
-__device__ __constant__ int coPerm[18][8] = {
-    {3,0,1,2,4,5,6,7},{2,3,0,1,4,5,6,7},{1,2,3,0,4,5,6,7},
-    {4,1,2,0,7,5,6,3},{7,1,2,4,3,5,6,0},{3,1,2,7,0,5,6,4},
-    {1,5,2,3,0,4,6,7},{5,4,2,3,1,0,6,7},{4,0,2,3,5,1,6,7},
-    {0,1,2,3,5,6,7,4},{0,1,2,3,6,7,4,5},{0,1,2,3,7,4,5,6},
-    {0,2,6,3,4,1,5,7},{0,6,5,3,4,2,1,7},{0,5,1,3,4,6,2,7},
-    {0,1,3,7,4,5,2,6},{0,1,7,6,4,5,3,2},{0,1,6,2,4,5,7,3}
-  };
-  
-  // how much each move twists each source corner
-  __device__ __constant__ int coTwist[18][8] = {
-    {0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0},
-    {2,0,0,1,1,0,0,2},{0,0,0,0,0,0,0,0},{2,0,0,1,1,0,0,2},
-    {1,2,0,0,2,1,0,0},{0,0,0,0,0,0,0,0},{1,2,0,0,2,1,0,0},
-    {0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0},
-    {0,1,2,0,0,2,1,0},{0,0,0,0,0,0,0,0},{0,1,2,0,0,2,1,0},
-    {0,0,1,2,0,0,2,1},{0,0,0,0,0,0,0,0},{0,0,1,2,0,0,2,1},
-  };
-  
-// —–– edge perm table for updating “slice‐membership” ——
-__device__ __constant__ int ePerm[18][12] = {
-  {3,0,1,2,4,5,6,7,8,9,10,11}, {2,3,0,1,4,5,6,7,8,9,10,11}, {1,2,3,0,4,5,6,7,8,9,10,11},
-  {8,1,2,3,11,5,6,7,4,9,10,0}, {4,1,2,3,0,5,6,7,11,9,10,8}, {11,1,2,3,8,5,6,7,0,9,10,4},
-  {0,9,2,3,4,8,6,7,1,5,10,11}, {0,5,2,3,4,1,6,7,9,8,10,11}, {0,8,2,3,4,9,6,7,5,1,10,11},
-  {0,1,2,3,5,6,7,4,8,9,10,11}, {0,1,2,3,6,7,4,5,8,9,10,11}, {0,1,2,3,7,4,5,6,8,9,10,11},
-  {0,1,10,3,4,5,9,7,8,2,6,11},{0,1,6,3,4,5,2,7,8,10,9,11},{0,1,9,3,4,5,10,7,8,6,2,11},
-  {0,1,2,11,4,5,6,10,8,9,3,7},{0,1,2,7,4,5,6,3,8,9,11,10},{0,1,2,10,4,5,6,11,8,9,7,3}
+// Device constant: corner permutation for each move (18 * 8 corners)
+__device__ __constant__ int d_cornerPermutation[18][8] = {
+    {3,0,1,2,4,5,6,7}, {2,3,0,1,4,5,6,7}, {1,2,3,0,4,5,6,7},
+    {4,1,2,0,7,5,6,3}, {7,1,2,4,3,5,6,0}, {3,1,2,7,0,5,6,4},
+    {1,5,2,3,0,4,6,7}, {5,4,2,3,1,0,6,7}, {4,0,2,3,5,1,6,7},
+    {0,1,2,3,5,6,7,4}, {0,1,2,3,6,7,4,5}, {0,1,2,3,7,4,5,6},
+    {0,2,6,3,4,1,5,7}, {0,6,5,3,4,2,1,7}, {0,5,1,3,4,6,2,7},
+    {0,1,3,7,4,5,2,6}, {0,1,7,6,4,5,3,2}, {0,1,6,2,4,5,7,3}
 };
 
-// target mask: bits 8–11 must all be 1
-__device__ __constant__ ESState targetSliceMask = (1<<8)|(1<<9)|(1<<10)|(1<<11);
+// Device constant: corner twist for each move (18 * 8 corners)
+__device__ __constant__ int d_cornerTwist[18][8] = {
+    {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0},
+    {2,0,0,1,1,0,0,2}, {0,0,0,0,0,0,0,0}, {2,0,0,1,1,0,0,2},
+    {1,2,0,0,2,1,0,0}, {0,0,0,0,0,0,0,0}, {1,2,0,0,2,1,0,0},
+    {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0},
+    {0,1,2,0,0,2,1,0}, {0,0,0,0,0,0,0,0}, {0,1,2,0,0,2,1,0},
+    {0,0,1,2,0,0,2,1}, {0,0,0,0,0,0,0,0}, {0,0,1,2,0,0,2,1}
+};
 
-// apply a corner‐twist move
-__device__ COState applyCOMoveGPU(COState s, int m) {
-    COState t = 0;
-    // exactly the same structure as the CPU code:
-    for (int dst = 0; dst < 8; ++dst) {
-        int src = coPerm[m][dst];                            // dst→src
-        int ori = (s >> (2*src)) & 0x3;                      // read old orientation
-        int nori = (ori + coTwist[m][dst]) % 3;              // twist for that dst
-        t |= COState(nori) << (2*dst);                       // write new orientation
+// Device constant: edge permutation for each move (18 * 12 edges)
+__device__ __constant__ int d_edgePermutation[18][12] = {
+    {3,0,1,2,4,5,6,7,8,9,10,11}, {2,3,0,1,4,5,6,7,8,9,10,11}, {1,2,3,0,4,5,6,7,8,9,10,11},
+    {8,1,2,3,11,5,6,7,4,9,10,0}, {4,1,2,3,0,5,6,7,11,9,10,8}, {11,1,2,3,8,5,6,7,0,9,10,4},
+    {0,9,2,3,4,8,6,7,1,5,10,11}, {0,5,2,3,4,1,6,7,9,8,10,11}, {0,8,2,3,4,9,6,7,5,1,10,11},
+    {0,1,2,3,5,6,7,4,8,9,10,11}, {0,1,2,3,6,7,4,5,8,9,10,11}, {0,1,2,3,7,4,5,6,8,9,10,11},
+    {0,1,10,3,4,5,9,7,8,2,6,11}, {0,1,6,3,4,5,2,7,8,10,9,11}, {0,1,9,3,4,5,10,7,8,6,2,11},
+    {0,1,2,11,4,5,6,10,8,9,3,7}, {0,1,2,7,4,5,6,3,8,9,11,10}, {0,1,2,10,4,5,6,11,8,9,7,3}
+};
+
+// Device constant: The 4 edges that must be in the E slice
+__device__ __constant__ u16 d_targetSliceMask = 0b1111'0000'0000;
+
+// Host notation for moves
+static const char* h_moveNotation[18] = {
+    "U","U2","U'",
+    "R","R2","R'",
+    "F","F2","F'",
+    "D","D2","D'",
+    "L","L2","L'",
+    "B","B2","B'"
+};
+
+// Device: apply corner-twist move
+__device__ u16 applyCornerTwistMoveGpu(u16 currentCornerState, int moveIndex) {
+    u16 newCornerState = 0;
+    for (int cornerDestination = 0; cornerDestination < 8; ++cornerDestination) {
+        int cornerSource = d_cornerPermutation[moveIndex][cornerDestination];
+        int orientation = (currentCornerState >> (2 * cornerSource)) & 0x3;
+        int twist = d_cornerTwist[moveIndex][cornerDestination];
+        int newOrientation = (orientation + twist) % 3;
+        newCornerState |= u16(newOrientation) << (2 * cornerDestination);
     }
-    return t;
+    return newCornerState;
 }
 
-
-// apply a slice‐membership move
-__device__ ESState applyESMoveGPU(ESState s, int m) {
-    ESState t = 0;
-    for (int dst = 0; dst < 12; ++dst) {
-        int src = ePerm[m][dst];
-        ESState bit = (s >> src) & 0x1;
-        t |= bit << dst;
+// Device: apply slice-membership move
+__device__ u16 applySliceMembershipMoveGpu(u16 currentSliceMask, int moveIndex) {
+    u16 newSliceMask = 0;
+    for (int edgeDestination = 0; edgeDestination < 12; ++edgeDestination) {
+        int edgeSource = d_edgePermutation[moveIndex][edgeDestination];
+        u16 bit = (currentSliceMask >> edgeSource) & 0x1;
+        newSliceMask |= bit << edgeDestination;
     }
-    return t;
+    return newSliceMask;
 }
 
-// brute‑force kernel now tests BOTH CORNER‐ORIENTATION == 0
-// and all 4 slice‐edges in slots 8..11
-__global__ void bruteForceCOKernel(
-    COState    startCoro,
-    ESState    startMask,
-    int        depth,
-    int       *solutionBuffer,
-    int       *solutionFoundFlag
+// Kernel: brute-force stage 2 sequences up to given depth
+__global__ void bruteForceStage2Kernel(
+    u16 startCornerState,
+    u16 startSliceMask,
+    int searchDepth,
+    int* d_solutionMoveIndicesBuffer,
+    int* d_solutionFoundFlag
 ) {
-    unsigned long long tid = blockIdx.x*blockDim.x + threadIdx.x;
-    // total = 14^depth
-    unsigned long long total = 1;
-    for (int i = 0; i < depth; ++i) total *= 14ULL;
-    if (tid >= total) return;
-
-    COState coro = startCoro;
-    ESState mask = startMask;
-    int seq[MAX_SEARCH_DEPTH];
-    unsigned long long code = tid;
-    int prevFace = -1;
-
-    for (int d = 0; d < depth; ++d) {
-        int sel  = code % 14; 
-        code    /= 14;
-        int m    = allowedMoves[sel];
-        int face = m/3;
-        if (face == prevFace) return;
-        prevFace = face;
-        seq[d] = m;
-        // update both state components
-        coro = applyCOMoveGPU(coro, m);
-        mask = applyESMoveGPU(mask, m);
+    unsigned long long threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned long long totalSequences = 1;
+    for (int depthIndex = 0; depthIndex < searchDepth; ++depthIndex) {
+        totalSequences *= 14ULL;
+    }
+    if (threadId >= totalSequences) {
+        return;
     }
 
-    // success if corners all zero AND slice‐mask bits 8..11 set
-    if (coro == 0 && (mask & targetSliceMask) == targetSliceMask) {
-        if (atomicExch(solutionFoundFlag, 1) == 0) {
-            for (int i = 0; i < depth; ++i)
-                solutionBuffer[i] = seq[i];
+    u16 cornerState = startCornerState;
+    u16 sliceMask = startSliceMask;
+    int localMoveSequence[MAX_DEPTH_STAGE_2];
+    unsigned long long code = threadId;
+    int previousFace = -1;
+
+    for (int step = 0; step < searchDepth; ++step) {
+        int moveSelection = code % 14;
+        code /= 14;
+        int moveIndex = d_allowedMoves[moveSelection];
+        int faceIndex = moveIndex / 3;
+        if (faceIndex == previousFace) {
+            return;
+        }
+        previousFace = faceIndex;
+        localMoveSequence[step] = moveIndex;
+        cornerState = applyCornerTwistMoveGpu(cornerState, moveIndex);
+        sliceMask = applySliceMembershipMoveGpu(sliceMask, moveIndex);
+    }
+
+    if (cornerState == 0 && (sliceMask & d_targetSliceMask) == d_targetSliceMask) {
+        if (atomicExch(d_solutionFoundFlag, 1) == 0) {
+            for (int index = 0; index < searchDepth; ++index) {
+                d_solutionMoveIndicesBuffer[index] = localMoveSequence[index];
+            }
         }
     }
 }
 
-std::vector<std::string> solveStage2(u64 cornerState, u64 edgeState) {
-    // 1) pack corner‐orientation
-    COState coro = 0;
-    for (int i = 0; i < 8; ++i) {
-        int packed = (cornerState >> (5*i)) & 0x1F;
-        int ori    = (packed >> 3) & 0x3;
-        coro |= COState(ori) << (2*i);
-    }
-    if (coro == 0) {
-        // but if edges not yet in slice, still need to search
+// Host: solve stage 2 by brute force on GPU
+std::vector<std::string> solveStage2(u64 cornerStateValue, u64 edgeStateValue) {
+    // Pack corner orientation bits
+    u16 startCornerState = 0;
+    for (int cornerIndex = 0; cornerIndex < 8; ++cornerIndex) {
+        int packedCorner = (cornerStateValue >> (5 * cornerIndex)) & 0x1F;
+        int cornerOrientation = (packedCorner >> 3) & 0x3;
+        startCornerState |= u16(cornerOrientation) << (2 * cornerIndex);
     }
 
-    // 2) pack edge “slice‐membership”:
-    //    bit i = 1 if the piece in slot i is one of {8,9,10,11}
-    ESState mask = 0;
-    for (int i = 0; i < 12; ++i) {
-        int packed = (edgeState >> (5*i)) & 0x1F;
-        int piece  = packed & 0xF;
-        bool isSlice = (piece >= 8 && piece <= 11);
-        mask |= ESState(isSlice) << i;
+    // Pack slice-membership bits
+    u16 startSliceMask = 0;
+    for (int edgeIndex = 0; edgeIndex < 12; ++edgeIndex) {
+        int packedEdge = (edgeStateValue >> (5 * edgeIndex)) & 0x1F;
+        int edgePiece = packedEdge & 0xF;
+        bool isInSlice = (edgePiece >= 8 && edgePiece <= 11);
+        startSliceMask |= u16(isInSlice) << edgeIndex;
     }
 
-    // 3) GPU buffers
-    int *d_sol, *d_flag;
-    cudaMalloc(&d_sol,  sizeof(int)*MAX_SEARCH_DEPTH);
-    cudaMalloc(&d_flag, sizeof(int));
-    int zero = 0;
-    cudaMemcpy(d_flag, &zero, sizeof(zero), cudaMemcpyHostToDevice);
+    // Allocate GPU buffers
+    int* d_solutionMoveIndicesBuffer; int* d_solutionFoundFlag;
+    cudaMalloc(&d_solutionMoveIndicesBuffer, sizeof(int) * MAX_DEPTH_STAGE_2);
+    cudaMalloc(&d_solutionFoundFlag, sizeof(int));
+    int hostZeroFlag = 0; cudaMemcpy(d_solutionFoundFlag, &hostZeroFlag, sizeof(hostZeroFlag), cudaMemcpyHostToDevice);
 
-    // 4) iterative deepening
-    auto t0 = std::chrono::steady_clock::now();
-    int hostSol[MAX_SEARCH_DEPTH];
-    int foundDepth = 0;
-    for (int depth = 1; depth <= MAX_SEARCH_DEPTH; ++depth) {
-        unsigned long long total = 1;
-        for (int i = 0; i < depth; ++i) total *= 14ULL;
-        int threadsPerBlock = 256;
-        int blocks = int((total + threadsPerBlock - 1) / threadsPerBlock);
+    // Iterative deepening search
+    int hostSolutionMoveIndices[MAX_DEPTH_STAGE_2] = {0};
+    int foundSolutionDepth = 0;
+    auto startTimestamp = std::chrono::steady_clock::now();
 
-        bruteForceCOKernel<<<blocks,threadsPerBlock>>>(
-            coro, mask, depth, d_sol, d_flag
+    for (int searchDepth = 1; searchDepth <= MAX_DEPTH_STAGE_2; ++searchDepth) {
+        unsigned long long totalSequences = 1;
+        for (int index = 0; index < searchDepth; ++index) {
+            totalSequences *= 14ULL;
+        }
+        int threadsPerBlockCount = 256;
+        int deviceBlockCount = int((totalSequences + threadsPerBlockCount - 1) / threadsPerBlockCount);
+
+        bruteForceStage2Kernel<<<deviceBlockCount, threadsPerBlockCount>>>(
+            startCornerState,
+            startSliceMask,
+            searchDepth,
+            d_solutionMoveIndicesBuffer,
+            d_solutionFoundFlag
         );
         cudaDeviceSynchronize();
 
-        int found = 0;
-        cudaMemcpy(&found, d_flag, sizeof(found), cudaMemcpyDeviceToHost);
-        if (found) {
-            foundDepth = depth;
-            cudaMemcpy(hostSol, d_sol, sizeof(int)*depth, cudaMemcpyDeviceToHost);
+        int hostFoundFlag = 0; cudaMemcpy(&hostFoundFlag, d_solutionFoundFlag, sizeof(hostFoundFlag), cudaMemcpyDeviceToHost);
+        if (hostFoundFlag) {
+            foundSolutionDepth = searchDepth;
+            cudaMemcpy(hostSolutionMoveIndices, d_solutionMoveIndicesBuffer, sizeof(int) * searchDepth, cudaMemcpyDeviceToHost);
             break;
         }
     }
-    auto t1 = std::chrono::steady_clock::now();
-    std::cout << "Stage 2 (CO + E‑slice) solved in "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()
-              << " ms\n";
+    auto endTimestamp = std::chrono::steady_clock::now();
+    auto elapsedMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(endTimestamp - startTimestamp).count();
+    std::cout << "Stage 2 (Domino Reduction) solved in " << elapsedMilliseconds << " ms\n";
 
-    cudaFree(d_sol);
-    cudaFree(d_flag);
+    cudaFree(d_solutionMoveIndicesBuffer); cudaFree(d_solutionFoundFlag);
 
-    // 5) translate to move notation
-    const char* names[18] = {
-        "U","U2","U'", "R","R2","R'", "F","F2","F'", 
-        "D","D2","D'", "L","L2","L'", "B","B2","B'"
-    };
-    std::vector<std::string> result;
-    result.reserve(foundDepth);
-    for (int i = 0; i < foundDepth; ++i)
-        result.emplace_back(names[hostSol[i]]);
-    return result;
+    // Build result strings
+    std::vector<std::string> solutionMoves;
+    solutionMoves.reserve(foundSolutionDepth);
+    for (int index = 0; index < foundSolutionDepth; ++index) {
+        solutionMoves.emplace_back(h_moveNotation[hostSolutionMoveIndices[index]]);
+    }
+    return solutionMoves;
 }

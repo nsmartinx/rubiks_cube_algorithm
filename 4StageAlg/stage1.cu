@@ -1,4 +1,3 @@
-// stage1.cu
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -57,7 +56,7 @@ __device__ __constant__ int d_edgePermutation[18][12] = {
 };
 
 // Device constant: edge flip mask for each move (18 moves)
-__device__ __constant__ u16 d_edgeFlipMask[18] = {
+__device__ __constant__ u16 d_edgeOrientation[18] = {
     // U
     0b0000'0000'0000,
     // U2
@@ -114,7 +113,7 @@ static const char* moveNotationNames[18] = {
 // Device: apply a single move to edge orientation state
 __device__ u16 applyMoveGpu(u16 currentState, int moveIndex) {
     u16 newState = 0;
-    u16 flipMask = d_edgeFlipMask[moveIndex];
+    u16 flipMask = d_edgeOrientation[moveIndex];
     for (int destination = 0; destination < 12; ++destination) {
         int source = d_edgePermutation[moveIndex][destination];
         int orientation = (currentState >> source) & 1;

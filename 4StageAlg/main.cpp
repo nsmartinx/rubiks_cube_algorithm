@@ -20,7 +20,7 @@ struct RawMove {
     int cornerPermutation[8];     // Piece that ends up in slot i
     int cornerOrientation[8];     // Increase in rotation of the piece that ends in slot i
     int edgePermutation[12];      // Piece that ends up in slot i
-    uint16_t edgeOrientationMask; // If Piece that ends up in slot i gets flipped
+    uint16_t edgeOrientation; // If Piece that ends up in slot i gets flipped
 };
 
 RawMove rawMoves[18] = {
@@ -195,7 +195,7 @@ void applyRawMoveOnCPU(uint64& cornerState, uint64& edgeState, int moveIndex) {
         uint64 packed = (oldEdges >> (5 * src)) & 0x1F;
         int pieceIndex = packed & 0xF;
         int orientation = (packed >> 4) & 0x1;
-        int newOrientation = orientation ^ ((move.edgeOrientationMask >> dest) & 1);
+        int newOrientation = orientation ^ ((move.edgeOrientation >> dest) & 1);
         uint64 outPacked = uint64(pieceIndex) | (uint64(newOrientation) << 4);
         newEdges |= outPacked << (5 * dest);
     }
