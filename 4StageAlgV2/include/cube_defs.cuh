@@ -1,12 +1,9 @@
 #pragma once
 #include <cstdint>
 #include <cuda_runtime.h>
+#include "common.h"
 
-using u64 = uint64_t;
-using u32 = uint32_t;
-using u16 = uint16_t;
-
-// Device constant: corner permutation for each move (dest ← src)
+// Device constant: corner permutation for each move (dest to src)
 __device__ __constant__ int d_cornerPermutation[18][8] = {
     {3,0,1,2,4,5,6,7}, {2,3,0,1,4,5,6,7}, {1,2,3,0,4,5,6,7}, // U,U2,U'
     {4,1,2,0,7,5,6,3}, {7,1,2,4,3,5,6,0}, {3,1,2,7,0,5,6,4}, // R,R2,R'
@@ -26,7 +23,7 @@ __device__ __constant__ int d_cornerOrientation[18][8] = {
     {0,0,1,2,0,0,2,1}, {0,0,0,0,0,0,0,0}, {0,0,1,2,0,0,2,1}  // B,B2,B'
 };
 
-// Device constant: edge permutation for each move (dest ← src)
+// Device constant: edge permutation for each move (dest to src)
 __device__ __constant__ int d_edgePermutation[18][12] = {
     {3,0,1,2,4,5,6,7,8,9,10,11}, {2,3,0,1,4,5,6,7,8,9,10,11}, {1,2,3,0,4,5,6,7,8,9,10,11}, // U,U2,U'
     {8,1,2,3,11,5,6,7,4,9,10,0}, {4,1,2,3,0,5,6,7,11,9,10,8}, {11,1,2,3,8,5,6,7,0,9,10,4}, // R,R2,R'

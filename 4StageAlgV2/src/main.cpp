@@ -5,47 +5,41 @@
 #include <sstream>
 #include "common.h"
 
-uint64_t g_rawEdgeState;
-uint64_t g_rawCornerState;
-
-// Forward declarations for each solving stage
-std::vector<std::string> solveStage1();
-std::vector<std::string> solveStage2();
-std::vector<std::string> solveStage3();
-std::vector<std::string> solveStage4();
+u64 g_rawEdgeState;
+u64 g_rawCornerState;
 
 // A single quarter-turn move at the cubie level
 struct RawMove {
     int cornerPermutation[8];
     int cornerOrientation[8];
     int edgePermutation[12];
-    uint16_t edgeOrientation;
+    u16 edgeOrientation;
 };
 
 RawMove rawMoves[18] = {
-    {{3,0,1,2,4,5,6,7},{0,0,0,0,0,0,0,0},{3,0,1,2,4,5,6,7,8,9,10,11},0b000000000000},
-    {{2,3,0,1,4,5,6,7},{0,0,0,0,0,0,0,0},{2,3,0,1,4,5,6,7,8,9,10,11},0b000000000000},
-    {{1,2,3,0,4,5,6,7},{0,0,0,0,0,0,0,0},{1,2,3,0,4,5,6,7,8,9,10,11},0b000000000000},
+    {{3,0,1,2,4,5,6,7},{0,0,0,0,0,0,0,0},{3,0,1,2,4,5,6,7,8,9,10,11},0b000000000000}, // U
+    {{2,3,0,1,4,5,6,7},{0,0,0,0,0,0,0,0},{2,3,0,1,4,5,6,7,8,9,10,11},0b000000000000}, // U2
+    {{1,2,3,0,4,5,6,7},{0,0,0,0,0,0,0,0},{1,2,3,0,4,5,6,7,8,9,10,11},0b000000000000}, // U'
 
-    {{4,1,2,0,7,5,6,3},{2,0,0,1,1,0,0,2},{8,1,2,3,11,5,6,7,4,9,10,0},0b000000000000},
-    {{7,1,2,4,3,5,6,0},{0,0,0,0,0,0,0,0},{4,1,2,3,0,5,6,7,11,9,10,8},0b000000000000},
-    {{3,1,2,7,0,5,6,4},{2,0,0,1,1,0,0,2},{11,1,2,3,8,5,6,7,0,9,10,4},0b000000000000},
+    {{4,1,2,0,7,5,6,3},{2,0,0,1,1,0,0,2},{8,1,2,3,11,5,6,7,4,9,10,0},0b000000000000}, // R
+    {{7,1,2,4,3,5,6,0},{0,0,0,0,0,0,0,0},{4,1,2,3,0,5,6,7,11,9,10,8},0b000000000000}, // R2
+    {{3,1,2,7,0,5,6,4},{2,0,0,1,1,0,0,2},{11,1,2,3,8,5,6,7,0,9,10,4},0b000000000000}, // R'
 
-    {{1,5,2,3,0,4,6,7},{1,2,0,0,2,1,0,0},{0,9,2,3,4,8,6,7,1,5,10,11},0b001100100010},
-    {{5,4,2,3,1,0,6,7},{0,0,0,0,0,0,0,0},{0,5,2,3,4,1,6,7,9,8,10,11},0b000000000000},
-    {{4,0,2,3,5,1,6,7},{1,2,0,0,2,1,0,0},{0,8,2,3,4,9,6,7,5,1,10,11},0b001100100010},
+    {{1,5,2,3,0,4,6,7},{1,2,0,0,2,1,0,0},{0,9,2,3,4,8,6,7,1,5,10,11},0b001100100010}, // F
+    {{5,4,2,3,1,0,6,7},{0,0,0,0,0,0,0,0},{0,5,2,3,4,1,6,7,9,8,10,11},0b000000000000}, // F2
+    {{4,0,2,3,5,1,6,7},{1,2,0,0,2,1,0,0},{0,8,2,3,4,9,6,7,5,1,10,11},0b001100100010}, // F'
 
-    {{0,1,2,3,5,6,7,4},{0,0,0,0,0,0,0,0},{0,1,2,3,5,6,7,4,8,9,10,11},0b000000000000},
-    {{0,1,2,3,6,7,4,5},{0,0,0,0,0,0,0,0},{0,1,2,3,6,7,4,5,8,9,10,11},0b000000000000},
-    {{0,1,2,3,7,4,5,6},{0,0,0,0,0,0,0,0},{0,1,2,3,7,4,5,6,8,9,10,11},0b000000000000},
+    {{0,1,2,3,5,6,7,4},{0,0,0,0,0,0,0,0},{0,1,2,3,5,6,7,4,8,9,10,11},0b000000000000}, // D
+    {{0,1,2,3,6,7,4,5},{0,0,0,0,0,0,0,0},{0,1,2,3,6,7,4,5,8,9,10,11},0b000000000000}, // D2
+    {{0,1,2,3,7,4,5,6},{0,0,0,0,0,0,0,0},{0,1,2,3,7,4,5,6,8,9,10,11},0b000000000000}, // D'
 
-    {{0,2,6,3,4,1,5,7},{0,1,2,0,0,2,1,0},{0,1,10,3,4,5,9,7,8,2,6,11},0b000000000000},
-    {{0,6,5,3,4,2,1,7},{0,0,0,0,0,0,0,0},{0,1,6,3,4,5,2,7,8,10,9,11},0b000000000000},
-    {{0,5,1,3,4,6,2,7},{0,1,2,0,0,2,1,0},{0,1,9,3,4,5,10,7,8,6,2,11},0b000000000000},
+    {{0,2,6,3,4,1,5,7},{0,1,2,0,0,2,1,0},{0,1,10,3,4,5,9,7,8,2,6,11},0b000000000000}, // L
+    {{0,6,5,3,4,2,1,7},{0,0,0,0,0,0,0,0},{0,1,6,3,4,5,2,7,8,10,9,11},0b000000000000}, // L2
+    {{0,5,1,3,4,6,2,7},{0,1,2,0,0,2,1,0},{0,1,9,3,4,5,10,7,8,6,2,11},0b000000000000}, // L'
 
-    {{0,1,3,7,4,5,2,6},{0,0,1,2,0,0,2,1},{0,1,2,11,4,5,6,10,8,9,3,7},0b110010001000},
-    {{0,1,7,6,4,5,3,2},{0,0,0,0,0,0,0,0},{0,1,2,7,4,5,6,3,8,9,11,10},0b000000000000},
-    {{0,1,6,2,4,5,7,3},{0,0,1,2,0,0,2,1},{0,1,2,10,4,5,6,11,8,9,7,3},0b110010001000}
+    {{0,1,3,7,4,5,2,6},{0,0,1,2,0,0,2,1},{0,1,2,11,4,5,6,10,8,9,3,7},0b110010001000}, // B
+    {{0,1,7,6,4,5,3,2},{0,0,0,0,0,0,0,0},{0,1,2,7,4,5,6,3,8,9,11,10},0b000000000000}, // B2
+    {{0,1,6,2,4,5,7,3},{0,0,1,2,0,0,2,1},{0,1,2,10,4,5,6,11,8,9,7,3},0b110010001000}  // B'
 };
 
 const char* moveNotation[18] = {
@@ -74,34 +68,34 @@ int parseMoveToken(const std::string& token) {
     return faceIndex * 3 + turnOffset;
 }
 
-void applyRawMoveOnHost(uint64_t& cornerState,
-                        uint64_t& edgeState,
+void applyRawMoveOnHost(u64& cornerState,
+                        u64& edgeState,
                         int moveIndex) {
     const RawMove& move = rawMoves[moveIndex];
-    uint64_t oldCorner = cornerState;
-    uint64_t oldEdge = edgeState;
-    uint64_t newCorner = 0;
-    uint64_t newEdge = 0;
+    u64 oldCorner = cornerState;
+    u64 oldEdge = edgeState;
+    u64 newCorner = 0;
+    u64 newEdge = 0;
 
     for (int slot = 0; slot < 8; ++slot) {
         int source = move.cornerPermutation[slot];
-        uint64_t packed = (oldCorner >> (5 * source)) & 0x1F;
+        u64 packed = (oldCorner >> (5 * source)) & 0x1F;
         int pieceIndex = int(packed & 0x7);
         int orientation = int((packed >> 3) & 0x3);
         int twist = move.cornerOrientation[slot];
         int newOri = (orientation + twist) % 3;
-        uint64_t outPacked = uint64_t(pieceIndex) | (uint64_t(newOri) << 3);
+        u64 outPacked = u64(pieceIndex) | (u64(newOri) << 3);
         newCorner |= outPacked << (5 * slot);
     }
 
     for (int slot = 0; slot < 12; ++slot) {
         int source = move.edgePermutation[slot];
-        uint64_t packed = (oldEdge >> (5 * source)) & 0x1F;
+        u64 packed = (oldEdge >> (5 * source)) & 0x1F;
         int pieceIndex = int(packed & 0xF);
         int orientation = int((packed >> 4) & 0x1);
         int flip = (move.edgeOrientation >> slot) & 1;
         int newOri = orientation ^ flip;
-        uint64_t outPacked = uint64_t(pieceIndex) | (uint64_t(newOri) << 4);
+        u64 outPacked = u64(pieceIndex) | (u64(newOri) << 4);
         newEdge |= outPacked << (5 * slot);
     }
 
@@ -147,13 +141,13 @@ int main() {
         "F2","L2","B2","F'","L2","R'","U'"
     };
 
-    uint64_t cornerState = 0;
-    uint64_t edgeState = 0;
+    u64 cornerState = 0;
+    u64 edgeState = 0;
     for (int slotIndex = 0; slotIndex < 8; ++slotIndex) {
-        cornerState |= uint64_t(slotIndex) << (5 * slotIndex);
+        cornerState |= u64(slotIndex) << (5 * slotIndex);
     }
     for (int slotIndex = 0; slotIndex < 12; ++slotIndex) {
-        edgeState |= uint64_t(slotIndex) << (5 * slotIndex);
+        edgeState |= u64(slotIndex) << (5 * slotIndex);
     }
 
     std::cout << "Scrambling with:";
