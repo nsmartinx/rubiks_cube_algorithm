@@ -14,7 +14,7 @@ __device__ __constant__ int d_allowedMovesStage4[6] = {1,4,7,10,13,16};
 
 struct ApplyEdgeOrientation {
     __device__ static void apply(u16 &state, int move) {
-        state = applyEdgeFlip(state, move);
+        state = applyEdgeOrientation(state, move);
     }
 };
 
@@ -65,7 +65,7 @@ struct ApplyCornerTwistAndEquatorSlice {
     __device__ static void apply(u32 &state, int move) {
         u16 twist = u16(state & 0xFFFFu);
         u16 slice = u16(state >> 16);
-        twist = applyCornerTwistMoveGpu(twist, move);
+        twist = applyCornerOrientationGpu(twist, move);
         slice = applyEdgePerm(slice, move);
         state = u32(twist) | (u32(slice) << 16);
     }
@@ -151,8 +151,7 @@ struct CornerPermutationAndMiddleSliceSolved {
 
 std::vector<std::string> solveStage3() {
     const int *deviceMoves = nullptr;
-    cudaGetSymbolAddress((void **)&deviceMoves,
-                         d_allowedMovesStage3);
+    cudaGetSymbolAddress((void **)&deviceMoves, d_allowedMovesStage3);
     return solveStage<10, u64, ApplyCornerPermutationAndMiddleSlice, CornerPermutationAndMiddleSliceSolved, 13>(
         PackCornerPermutationAndMiddleSliceState::pack, 13, deviceMoves
     );

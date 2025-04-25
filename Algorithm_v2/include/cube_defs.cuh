@@ -54,65 +54,63 @@ static constexpr const char* move_names[18] = {
     "D","D2","D'", "L","L2","L'", "B","B2","B'"
 };
 
-//— Generic device‐only helpers —//
-
-__device__ inline u32 applyCornerPerm(u32 state, int mv) {
-    u32 out = 0;
+__device__ inline u32 applyCornerPerm(u32 cubeState, int moveIndex) {
+    u32 newState = 0;
     #pragma unroll
-    for (int d = 0; d < 8; ++d) {
-        int s = d_cornerPermutation[mv][d];
-        u32 piece = (state >> (3 * s)) & 7u;
-        out |= piece << (3 * d);
+    for (int slot = 0; slot < 8; ++slot) {
+        int sourceSlot = d_cornerPermutation[moveIndex][slot];
+        u32 piece = (cubeState >> (3 * sourceSlot)) & 7u;
+        newState |= piece << (3 * slot);
     }
-    return out;
+    return newState;
 }
 
-__device__ inline u16 applyEdgePerm(u16 state, int mv) {
-    u16 out = 0;
+__device__ inline u16 applyEdgePerm(u16 sliceState, int moveIndex) {
+    u16 newState = 0;
     #pragma unroll
-    for (int d = 0; d < 12; ++d) {
-        int s = d_edgePermutation[mv][d];
-        u16 bit = (state >> s) & 1u;
-        out |= bit << d;
+    for (int slot = 0; slot < 12; ++slot) {
+        int sourceSlot = d_edgePermutation[moveIndex][slot];
+        u16 edgeBit = (sliceState >> sourceSlot) & 1u;
+        newState |= edgeBit << slot;
     }
-    return out;
+    return newState;
 }
 
-__device__ inline u32 applyCornerTwist(u32 state, int mv) {
-    u32 out = 0;
+__device__ inline u32 applyCornerOrientation(u32 cubeState, int moveIndex) {
+    u32 newState = 0;
     #pragma unroll
-    for (int d = 0; d < 8; ++d) {
-        // unpack 5 bits: low 3 = piece, high 2 = orientation
-        u32 packed    = (state >> (5 * d)) & 0x1Fu;
-        u32 pieceIdx  = packed & 0x7u;
-        u32 ori       = (packed >> 3) & 0x3u;
-        u32 newOri    = (ori + d_cornerOrientation[mv][d]) % 3u;
-        u32 outPacked = pieceIdx | (newOri << 3);
-        out |= outPacked << (5 * d);
+    for (int slot = 0; slot < 8; ++slot) {
+        u32 packed = (cubeState >> (5 * slot)) & 0x1Fu;
+        u32 piece = packed & 0x7u;
+        u32 orientation = (packed >> 3) & 0x3u;
+        u32 twist = d_cornerOrientation[moveIndex][slot];
+        u32 newOrientation = (orientation + twist) % 3u;
+        u32 outPacked = piece | (newOrientation << 3);
+        newState |= outPacked << (5 * slot);
     }
-    return out;
+    return newState;
 }
 
-__device__ u16 applyCornerTwistMoveGpu(u16 currentCornerState, int moveIndex) {
-    u16 newCornerState = 0;
-    for (int dst = 0; dst < 8; ++dst) {
-        int src     = d_cornerPermutation[moveIndex][dst];
-        int ori     = (currentCornerState >> (2*src)) & 0x3;
-        int twist   = d_cornerOrientation[moveIndex][dst];
-        int newOri  = (ori + twist) % 3;
-        newCornerState |= u16(newOri) << (2*dst);
+__device__ u16 applyCornerOrientationGpu(u16 cornerState, int moveIndex) {
+    u16 newState = 0;
+    for (int slot = 0; slot < 8; ++slot) {
+        int sourceSlot = d_cornerPermutation[moveIndex][slot];
+        int orientation = (cornerState >> (2 * sourceSlot)) & 0x3;
+        int twist = d_cornerOrientation[moveIndex][slot];
+        int newOrientation = (orientation + twist) % 3;
+        newState |= u16(newOrientation) << (2 * slot);
     }
-    return newCornerState;
+    return newState;
 }
 
-__device__ inline u16 applyEdgeFlip(u16 state, int mv) {
-    u16 out = 0;
+__device__ inline u16 applyEdgeOrientation(u16 edgeState, int moveIndex) {
+    u16 newState = 0;
     #pragma unroll
-    for (int d = 0; d < 12; ++d) {
-        int s = d_edgePermutation[mv][d];
-        u16 ori = (state >> s) & 1u;
-        ori ^= (d_edgeOrientation[mv] >> d) & 1u;
-        out |= ori << d;
+    for (int slot = 0; slot < 12; ++slot) {
+        int sourceSlot = d_edgePermutation[moveIndex][slot];
+        u16 orientationBit = (edgeState >> sourceSlot) & 1u;
+        u16 flipMaskBit = (d_edgeOrientation[moveIndex] >> sourceSlot) & 1u;
+        newState |= (orientationBit ^ flipMaskBit) << slot;
     }
-    return out;
+    return newState;
 }
