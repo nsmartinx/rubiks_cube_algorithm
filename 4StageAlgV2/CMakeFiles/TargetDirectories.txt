@@ -1,3 +1,0 @@
-/home/nsmartinx/projects/rubiks_cube_algorithm/4StageAlgV2/CMakeFiles/rubiks.dir
-/home/nsmartinx/projects/rubiks_cube_algorithm/4StageAlgV2/CMakeFiles/edit_cache.dir
-/home/nsmartinx/projects/rubiks_cube_algorithm/4StageAlgV2/CMakeFiles/rebuild_cache.dir
