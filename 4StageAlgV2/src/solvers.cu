@@ -4,6 +4,11 @@
 #include <string>
 #include <cstdint>
 
+__device__ __constant__ int d_allowedMovesStage1[18] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17};
+__device__ __constant__ int d_allowedMovesStage2[14] = {0,1,2,3,4,5,7,9,10,11,12,13,14,16};
+__device__ __constant__ int d_allowedMovesStage3[10] = {0,1,2,4,7,9,10,11,13,16};
+__device__ __constant__ int d_allowedMovesStage4[6] = {1,4,7,10,13,16};
+
 // these globals are set in main.cpp before each stage
 extern u64 g_rawEdgeState;
 extern u64 g_rawCornerState;
@@ -29,7 +34,9 @@ u16 packEO() {
 }
 
 std::vector<std::string> solveStage1() {
-    return solveStage<18, u16, ApplyEO, IsSolved1, 7>(packEO, 7, d_allowedMovesStage1);
+    const int* d_moves1 = nullptr;
+    cudaGetSymbolAddress((void**)&d_moves1, d_allowedMovesStage1);
+    return solveStage<18, u16, ApplyEO, IsSolved1, 7>(packEO, 7, d_moves1);
 }
 
 //=== Stage 2: corner‐twist + E‐slice (14 moves, MaxDepth=10) ===//
@@ -57,7 +64,7 @@ struct ApplyStage2 {
     static __device__ void apply(u32 &state, int move) {
         u16 twist = state & 0xFFFFu;
         u16 slice = state >> 16;
-        twist = applyCornerTwist(twist, move);
+        twist = applyCornerTwistMoveGpu(twist, move);
         slice = applyEdgePerm(slice, move);
         state = u32(twist) | (u32(slice) << 16);
     }
@@ -68,15 +75,17 @@ struct IsSolved2 {
         u16 twist = state & 0xFFFFu;
         u16 slice = state >> 16;
         return twist == 0
-            && (slice & d_middleSliceMask) == d_middleSliceMask;
+            && (slice & d_equatorSliceMask) == d_equatorSliceMask;
     }
 };
 
 
 
 std::vector<std::string> solveStage2() {
+    const int* d_moves2 = nullptr;
+    cudaGetSymbolAddress((void**)&d_moves2, d_allowedMovesStage2);
     return solveStage<14, u32, ApplyStage2, IsSolved2, 10>(
-        PackStage2::pack, 10, d_allowedMovesStage2
+        PackStage2::pack, 10, d_moves2
     );
 }
 
@@ -92,8 +101,9 @@ struct PackStage3 {
         }
         u16 sliceMask = 0;
         for (int i = 0; i < 12; ++i) {
-            u32 slot = (g_rawEdgeState >> (5*i)) & 0x1Fu;
-            bool inMiddle = (slot == 0 || slot == 2 || slot == 4 || slot == 6);
+            u32 packed = (g_rawEdgeState >> (5*i)) & 0x1Fu;
+            u32 piece  = packed & 0xFu;
+            bool inMiddle = (piece == 0 || piece == 2 || piece == 4 || piece == 6);
             sliceMask |= u16(inMiddle) << i;
         }
         return u64(cornerPack) | (u64(sliceMask) << 32);
@@ -139,8 +149,10 @@ struct IsSolved3 {
 
 
 std::vector<std::string> solveStage3() {
+    const int* d_moves3 = nullptr;
+    cudaGetSymbolAddress((void**)&d_moves3, d_allowedMovesStage3);
     return solveStage<10, u64, ApplyStage3, IsSolved3, 13>(
-        PackStage3::pack, 13, d_allowedMovesStage3
+        PackStage3::pack, 13, d_moves3
     );
 }
 
@@ -197,7 +209,9 @@ struct IsSolved4 {
 };
 
 std::vector<std::string> solveStage4() {
+    const int* d_moves4 = nullptr;
+    cudaGetSymbolAddress((void**)&d_moves4, d_allowedMovesStage4);
     return solveStage<6, Stage4State, ApplyStage4, IsSolved4, 15>(
-        PackStage4::pack, 15, d_allowedMovesStage4
+        PackStage4::pack, 15, d_moves4
     );
 }

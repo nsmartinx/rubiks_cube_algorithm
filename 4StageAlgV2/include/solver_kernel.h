@@ -3,6 +3,7 @@
 #include <string>
 #include <cuda_runtime.h>
 #include "cube_defs.h"
+#include <iostream>
 
 template<int MoveCount,
          typename StateType,
@@ -65,6 +66,7 @@ std::vector<std::string> solveStage(
 
     int hostSeq[MaxDepth] = {0}, found=0;
     for(int depth=1; depth<=maxDepth; ++depth){
+        std::cout << "Attempting depth: " << depth << std::endl;
         unsigned long long total = 1;
         for(int i=0;i<depth;++i) total *= MoveCount;
 
@@ -75,6 +77,13 @@ std::vector<std::string> solveStage(
                            depth,
                            d_buf,
                            d_flag);
+                           cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+          std::cerr << "[solveStage] kernel launch failed: "
+                    << cudaGetErrorString(err) << "\n";
+            break;
+        }
+
         cudaDeviceSynchronize();
 
         cudaMemcpy(&found, d_flag, sizeof(found), cudaMemcpyDeviceToHost);
@@ -92,5 +101,6 @@ std::vector<std::string> solveStage(
 
     cudaFree(d_buf);
     cudaFree(d_flag);
+    std::cout << "ERROR: No solution found" << std::endl;
     return {};
 }

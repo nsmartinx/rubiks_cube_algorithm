@@ -46,13 +46,10 @@ __device__ __constant__ u16 d_edgeOrientation[18] = {
     0b1100'1000'1000, 0b0000'0000'0000, 0b1100'1000'1000  // B,B2,B'
 };
 
-extern __device__ __constant__ int d_allowedMovesStage1[18] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17};
-extern __device__ __constant__ int d_allowedMovesStage2[14] = {0,1,2,3,4,5,7,9,10,11,12,13,14,16};
-extern __device__ __constant__ int d_allowedMovesStage3[10] = {0,1,2,4,7,9,10,11,13,16};
-extern __device__ __constant__ int d_allowedMovesStage4[6] = {1,4,7,10,13,16};
 
 // Slice‐mask helper
-__device__ __constant__ u16 d_middleSliceMask = 0b1111'0000'0000;
+__device__ __constant__ u16 d_equatorSliceMask = 0b1111'0000'0000;
+__device__ __constant__ u16 d_middleSliceMask = 0b0000'0101'0101;
 
 // Human‐readable move names
 static constexpr const char* move_names[18] = {
@@ -97,6 +94,18 @@ __device__ inline u32 applyCornerTwist(u32 state, int mv) {
         out |= outPacked << (5 * d);
     }
     return out;
+}
+
+__device__ u16 applyCornerTwistMoveGpu(u16 currentCornerState, int moveIndex) {
+    u16 newCornerState = 0;
+    for (int dst = 0; dst < 8; ++dst) {
+        int src     = d_cornerPermutation[moveIndex][dst];
+        int ori     = (currentCornerState >> (2*src)) & 0x3;
+        int twist   = d_cornerOrientation[moveIndex][dst];
+        int newOri  = (ori + twist) % 3;
+        newCornerState |= u16(newOri) << (2*dst);
+    }
+    return newCornerState;
 }
 
 __device__ inline u16 applyEdgeFlip(u16 state, int mv) {
