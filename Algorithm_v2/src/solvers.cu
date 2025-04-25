@@ -10,7 +10,7 @@ __device__ __constant__ int d_allowedMovesStage2[14] = {0,1,2,3,4,5,7,9,10,11,12
 __device__ __constant__ int d_allowedMovesStage3[10] = {0,1,2,4,7,9,10,11,13,16};
 __device__ __constant__ int d_allowedMovesStage4[6] = {1,4,7,10,13,16};
 
-//=== Stage 1: edge orientation ===
+//=== Stage 1: Edge Orientation ===
 
 struct ApplyEdgeOrientation {
     __device__ static void apply(u16 &state, int move) {
@@ -41,7 +41,7 @@ std::vector<std::string> solveStage1() {
     );
 }
 
-//=== Stage 2: corner twist + equator slice ===
+//=== Stage 2: Domino Reduction ===
 
 struct PackCornerTwistAndEquatorSliceState {
     static u32 pack() {
@@ -63,19 +63,19 @@ struct PackCornerTwistAndEquatorSliceState {
 
 struct ApplyCornerTwistAndEquatorSlice {
     __device__ static void apply(u32 &state, int move) {
-        u16 twist = u16(state & 0xFFFFu);
-        u16 slice = u16(state >> 16);
-        twist = applyCornerOrientationGpu(twist, move);
-        slice = applyEdgePerm(slice, move);
-        state = u32(twist) | (u32(slice) << 16);
+        u16 orientation = u16(state & 0xFFFFu);
+        u16 permutation = u16(state >> 16);
+        orientation = applyCornerOrientation(orientation, move);
+        permutation = applyEdgePerm(permutation, move);
+        state = u32(orientation) | (u32(permutation) << 16);
     }
 };
 
 struct CornerTwistAndEquatorSliceSolved {
     __device__ static bool check(u32 state) {
-        u16 twist = u16(state & 0xFFFFu);
-        u16 slice = u16(state >> 16);
-        return twist == 0 && (slice & d_equatorSliceMask) == d_equatorSliceMask;
+        u16 orientation = u16(state & 0xFFFFu);
+        u16 permutation = u16(state >> 16);
+        return orientation == 0 && (permutation & d_equatorSliceMask) == d_equatorSliceMask;
     }
 };
 
@@ -87,7 +87,7 @@ std::vector<std::string> solveStage2() {
     );
 }
 
-//=== Stage 3: corner permutation + middle slice ===
+//=== Stage 3: Half Turn Reduction ===
 
 struct PackCornerPermutationAndMiddleSliceState {
     static u64 pack() {
@@ -157,7 +157,7 @@ std::vector<std::string> solveStage3() {
     );
 }
 
-//=== Stage 4: final corner+edge permutation ===
+//=== Stage 4: Solved ===
 
 struct FinalPermutationState {
     u32 cornerState;
@@ -183,21 +183,10 @@ struct PackFinalPermutationState {
     }
 };
 
-__device__ inline u64 applyFullEdgePermutation(u64 state, int move) {
-    u64 out = 0;
-    #pragma unroll
-    for (int i = 0; i < 12; ++i) {
-        int src = d_edgePermutation[move][i];
-        u64 piece = (state >> (4 * src)) & 0xFull;
-        out |= piece << (4 * i);
-    }
-    return out;
-}
-
 struct ApplyFinalPermutation {
     __device__ static void apply(FinalPermutationState &st, int move) {
         st.cornerState = applyCornerPerm(st.cornerState, move);
-        st.edgeState   = applyFullEdgePermutation(st.edgeState, move);
+        st.edgeState = applyFullEdgePermutation(st.edgeState, move);
     }
 };
 
@@ -209,8 +198,7 @@ struct FinalPermutationSolved {
 
 std::vector<std::string> solveStage4() {
     const int *deviceMoves = nullptr;
-    cudaGetSymbolAddress((void **)&deviceMoves,
-                         d_allowedMovesStage4);
+    cudaGetSymbolAddress((void **)&deviceMoves, d_allowedMovesStage4);
     return solveStage<6, FinalPermutationState, ApplyFinalPermutation, FinalPermutationSolved, 15>(
         PackFinalPermutationState::pack, 15, deviceMoves
     );

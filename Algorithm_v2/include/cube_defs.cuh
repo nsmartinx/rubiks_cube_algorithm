@@ -76,22 +76,18 @@ __device__ inline u16 applyEdgePerm(u16 sliceState, int moveIndex) {
     return newState;
 }
 
-__device__ inline u32 applyCornerOrientation(u32 cubeState, int moveIndex) {
-    u32 newState = 0;
+__device__ inline u64 applyFullEdgePermutation(u64 state, int move) {
+    u64 out = 0;
     #pragma unroll
-    for (int slot = 0; slot < 8; ++slot) {
-        u32 packed = (cubeState >> (5 * slot)) & 0x1Fu;
-        u32 piece = packed & 0x7u;
-        u32 orientation = (packed >> 3) & 0x3u;
-        u32 twist = d_cornerOrientation[moveIndex][slot];
-        u32 newOrientation = (orientation + twist) % 3u;
-        u32 outPacked = piece | (newOrientation << 3);
-        newState |= outPacked << (5 * slot);
+    for (int i = 0; i < 12; ++i) {
+        int src = d_edgePermutation[move][i];
+        u64 piece = (state >> (4 * src)) & 0xFull;
+        out |= piece << (4 * i);
     }
-    return newState;
+    return out;
 }
 
-__device__ u16 applyCornerOrientationGpu(u16 cornerState, int moveIndex) {
+__device__ u16 applyCornerOrientation(u16 cornerState, int moveIndex) {
     u16 newState = 0;
     for (int slot = 0; slot < 8; ++slot) {
         int sourceSlot = d_cornerPermutation[moveIndex][slot];
