@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 #include <cuda_runtime.h>
-#include "cube_defs.h"
+#include "cube_defs.cuh"
 #include <iostream>
 
 template<int MoveCount,
@@ -13,7 +13,7 @@ template<int MoveCount,
 __global__
 void bruteForceKernel(
     StateType    startState,
-    const int   *allowedMoves,   // pass in your __constant__ table
+    const int   *allowedMoves,
     int          depth,
     int         *solutionBuf,
     int         *foundFlag
@@ -31,7 +31,7 @@ void bruteForceKernel(
     for(int d=0; d<depth; ++d){
         int sel = code % MoveCount;
         code  /= MoveCount;
-        int mv  = allowedMoves[sel];      // now a simple deref
+        int mv  = allowedMoves[sel];
         int face = mv/3;
         if(face == prevFace) return;
         prevFace = face;
@@ -55,7 +55,7 @@ template<int MoveCount,
 std::vector<std::string> solveStage(
     StateType    (*packState)(),
     int           maxDepth,
-    const int    *d_allowedMoves   // extra parameter here
+    const int    *d_allowedMoves
 ) {
     StateType start = packState();
 
@@ -66,14 +66,13 @@ std::vector<std::string> solveStage(
 
     int hostSeq[MaxDepth] = {0}, found=0;
     for(int depth=1; depth<=maxDepth; ++depth){
-        std::cout << "Attempting depth: " << depth << std::endl;
         unsigned long long total = 1;
         for(int i=0;i<depth;++i) total *= MoveCount;
 
         int blocks = int((total + 255)/256);
         bruteForceKernel<MoveCount,StateType,ApplyMove,IsSolvedPred,MaxDepth>
           <<<blocks,256>>>(start,
-                           d_allowedMoves,   // pass it in
+                           d_allowedMoves,
                            depth,
                            d_buf,
                            d_flag);

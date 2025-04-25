@@ -1,5 +1,5 @@
-#include "solver_kernel.h"
-#include "cube_defs.h"
+#include "solver_kernel.cuh"
+#include "cube_defs.cuh"
 #include <vector>
 #include <string>
 #include <cstdint>
