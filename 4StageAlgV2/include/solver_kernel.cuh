@@ -1,105 +1,129 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <iostream>
 #include <cuda_runtime.h>
 #include "cube_defs.cuh"
-#include <iostream>
 
+// Kernel: brute-force search
 template<int MoveCount,
          typename StateType,
-         typename ApplyMove,     // functor: ApplyMove::apply(state,move)
-         typename IsSolvedPred,  // functor: IsSolvedPred::check(state)
+         typename ApplyMove,
+         typename IsSolvedPred,
          int MaxDepth>
 __global__
 void bruteForceKernel(
-    StateType    startState,
-    const int   *allowedMoves,
+    StateType    start_state,
+    const int*   allowed_moves,
     int          depth,
-    int         *solutionBuf,
-    int         *foundFlag
+    int*         solution_buffer,
+    int*         found_flag
 ) {
-    unsigned long long idx   = blockIdx.x*blockDim.x + threadIdx.x;
-    unsigned long long total = 1;
-    for(int i=0;i<depth;++i) total *= MoveCount;
-    if (idx >= total) return;
-
-    StateType st = startState;
-    int seq[MaxDepth];
-    int prevFace = -1;
-    unsigned long long code = idx;
-
-    for(int d=0; d<depth; ++d){
-        int sel = code % MoveCount;
-        code  /= MoveCount;
-        int mv  = allowedMoves[sel];
-        int face = mv/3;
-        if(face == prevFace) return;
-        prevFace = face;
-        seq[d] = mv;
-        ApplyMove::apply(st, mv);
+    // compute flat thread index
+    unsigned long long thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+    // total sequences = MoveCount^depth
+    unsigned long long total_sequences = 1;
+    for (int i = 0; i < depth; ++i) {
+        total_sequences *= MoveCount;
+    }
+    if (thread_id >= total_sequences) {
+        return;
     }
 
-    if(IsSolvedPred::check(st)){
-        if(atomicExch(foundFlag,1) == 0){
-            for(int i=0;i<depth;++i)
-                solutionBuf[i] = seq[i];
+    StateType state = start_state;
+    int sequence[MaxDepth];
+    int previous_face = -1;
+    unsigned long long sequence_code = thread_id;
+
+    // decode moves and apply
+    for (int step = 0; step < depth; ++step) {
+        int selection = sequence_code % MoveCount;
+        sequence_code /= MoveCount;
+        int move = allowed_moves[selection];
+        int face = move / 3;
+        if (face == previous_face) {
+            return;
+        }
+        previous_face = face;
+        sequence[step] = move;
+        ApplyMove::apply(state, move);
+    }
+
+    // check solved and record
+    if (IsSolvedPred::check(state)) {
+        if (atomicExch(found_flag, 1) == 0) {
+            for (int i = 0; i < depth; ++i) {
+                solution_buffer[i] = sequence[i];
+            }
         }
     }
 }
 
+// Host driver: iterative deepening
 template<int MoveCount,
          typename StateType,
          typename ApplyMove,
          typename IsSolvedPred,
          int MaxDepth>
 std::vector<std::string> solveStage(
-    StateType    (*packState)(),
-    int           maxDepth,
-    const int    *d_allowedMoves
+    StateType    (*pack_state)(),
+    int           max_depth,
+    const int*    device_allowed_moves
 ) {
-    StateType start = packState();
+    StateType start_state = pack_state();
 
-    int *d_buf, *d_flag;
-    cudaMalloc(&d_buf,  sizeof(int)*MaxDepth);
-    cudaMalloc(&d_flag, sizeof(int));
-    cudaMemset(d_flag,0,sizeof(int));
+    int* device_solution_buffer = nullptr;
+    int* device_found_flag = nullptr;
+    cudaMalloc(&device_solution_buffer, sizeof(int) * MaxDepth);
+    cudaMalloc(&device_found_flag, sizeof(int));
+    cudaMemset(device_found_flag, 0, sizeof(int));
 
-    int hostSeq[MaxDepth] = {0}, found=0;
-    for(int depth=1; depth<=maxDepth; ++depth){
-        unsigned long long total = 1;
-        for(int i=0;i<depth;++i) total *= MoveCount;
+    int host_sequence[MaxDepth] = {0};
+    int host_found_flag = 0;
 
-        int blocks = int((total + 255)/256);
-        bruteForceKernel<MoveCount,StateType,ApplyMove,IsSolvedPred,MaxDepth>
-          <<<blocks,256>>>(start,
-                           d_allowedMoves,
-                           depth,
-                           d_buf,
-                           d_flag);
-                           cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-          std::cerr << "[solveStage] kernel launch failed: "
-                    << cudaGetErrorString(err) << "\n";
+    for (int depth = 1; depth <= max_depth; ++depth) {
+        // compute number of blocks needed
+        unsigned long long total_sequences = 1;
+        for (int i = 0; i < depth; ++i) {
+            total_sequences *= MoveCount;
+        }
+        int block_count = int((total_sequences + 255) / 256);
+
+        // launch kernel
+        bruteForceKernel<MoveCount, StateType, ApplyMove, IsSolvedPred, MaxDepth>
+            <<<block_count, 256>>>(
+                start_state,
+                device_allowed_moves,
+                depth,
+                device_solution_buffer,
+                device_found_flag
+            );
+        cudaError_t error = cudaGetLastError();
+        if (error != cudaSuccess) {
+            std::cerr << "[solveStage] kernel launch failed: "
+                      << cudaGetErrorString(error) << std::endl;
             break;
         }
 
         cudaDeviceSynchronize();
 
-        cudaMemcpy(&found, d_flag, sizeof(found), cudaMemcpyDeviceToHost);
-        if(found){
-            cudaMemcpy(hostSeq, d_buf, sizeof(int)*depth, cudaMemcpyDeviceToHost);
-            std::vector<std::string> sol;
-            sol.reserve(depth);
-            for(int i=0;i<depth;++i)
-                sol.push_back(move_names[hostSeq[i]]);
-            cudaFree(d_buf);
-            cudaFree(d_flag);
-            return sol;
+        // check for solution
+        cudaMemcpy(&host_found_flag, device_found_flag, sizeof(host_found_flag), cudaMemcpyDeviceToHost);
+        if (host_found_flag) {
+            cudaMemcpy(host_sequence, device_solution_buffer, sizeof(int) * depth, cudaMemcpyDeviceToHost);
+            std::vector<std::string> solution;
+            solution.reserve(depth);
+            for (int i = 0; i < depth; ++i) {
+                solution.push_back(move_names[host_sequence[i]]);
+            }
+            cudaFree(device_solution_buffer);
+            cudaFree(device_found_flag);
+            return solution;
         }
     }
 
-    cudaFree(d_buf);
-    cudaFree(d_flag);
-    std::cout << "ERROR: No solution found" << std::endl;
+    cudaFree(device_solution_buffer);
+    cudaFree(device_found_flag);
+    std::cerr << "ERROR: No solution found" << std::endl;
     return {};
 }
