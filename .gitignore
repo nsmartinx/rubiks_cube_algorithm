@@ -1,3 +1,8 @@
 .vscode
 SpeedTest/out
 4StageAlg/out
+4StageAlgV2/CMakeLists.txt
+4StageAlgV2/cmake_install.cmake
+4StageAlgV2/CMakeFiles
+4StageAlgV2/CMakeCache.txt
+4StageAlgB2/Makefile
