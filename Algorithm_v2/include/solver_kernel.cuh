@@ -68,18 +68,18 @@ template<int MoveCount,
 std::vector<std::string> solveStage(
     StateType    (*pack_state)(),
     int           max_depth,
-    const int*    device_allowed_moves
+    const int*    d_allowed_moves
 ) {
     StateType start_state = pack_state();
 
-    int* device_solution_buffer = nullptr;
-    int* device_found_flag = nullptr;
-    cudaMalloc(&device_solution_buffer, sizeof(int) * MaxDepth);
-    cudaMalloc(&device_found_flag, sizeof(int));
-    cudaMemset(device_found_flag, 0, sizeof(int));
+    int* d_solution_buffer = nullptr;
+    int* d_found_flag = nullptr;
+    cudaMalloc(&d_solution_buffer, sizeof(int) * MaxDepth);
+    cudaMalloc(&d_found_flag, sizeof(int));
+    cudaMemset(d_found_flag, 0, sizeof(int));
 
-    int host_sequence[MaxDepth] = {0};
-    int host_found_flag = 0;
+    int h_sequence[MaxDepth] = {0};
+    int h_found_flag = 0;
 
     for (int depth = 1; depth <= max_depth; ++depth) {
         // compute number of blocks needed
@@ -93,10 +93,10 @@ std::vector<std::string> solveStage(
         bruteForceKernel<MoveCount, StateType, ApplyMove, IsSolvedPred, MaxDepth>
             <<<block_count, 256>>>(
                 start_state,
-                device_allowed_moves,
+                d_allowed_moves,
                 depth,
-                device_solution_buffer,
-                device_found_flag
+                d_solution_buffer,
+                d_found_flag
             );
         cudaError_t error = cudaGetLastError();
         if (error != cudaSuccess) {
@@ -108,22 +108,22 @@ std::vector<std::string> solveStage(
         cudaDeviceSynchronize();
 
         // check for solution
-        cudaMemcpy(&host_found_flag, device_found_flag, sizeof(host_found_flag), cudaMemcpyDeviceToHost);
-        if (host_found_flag) {
-            cudaMemcpy(host_sequence, device_solution_buffer, sizeof(int) * depth, cudaMemcpyDeviceToHost);
+        cudaMemcpy(&h_found_flag, d_found_flag, sizeof(h_found_flag), cudaMemcpyDeviceToHost);
+        if (h_found_flag) {
+            cudaMemcpy(h_sequence, d_solution_buffer, sizeof(int) * depth, cudaMemcpyDeviceToHost);
             std::vector<std::string> solution;
             solution.reserve(depth);
             for (int i = 0; i < depth; ++i) {
-                solution.push_back(move_names[host_sequence[i]]);
+                solution.push_back(move_names[h_sequence[i]]);
             }
-            cudaFree(device_solution_buffer);
-            cudaFree(device_found_flag);
+            cudaFree(d_solution_buffer);
+            cudaFree(d_found_flag);
             return solution;
         }
     }
 
-    cudaFree(device_solution_buffer);
-    cudaFree(device_found_flag);
+    cudaFree(d_solution_buffer);
+    cudaFree(d_found_flag);
     std::cerr << "ERROR: No solution found" << std::endl;
     return {};
 }

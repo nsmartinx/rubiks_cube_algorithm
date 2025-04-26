@@ -34,10 +34,10 @@ u16 packEdgeOrientationState() {
 }
 
 std::vector<std::string> solveStage1() {
-    const int *deviceMoves = nullptr;
-    cudaGetSymbolAddress((void **)&deviceMoves, d_allowedMovesStage1);
+    const int *d_moves = nullptr;
+    cudaGetSymbolAddress((void **)&d_moves, d_allowedMovesStage1);
     return solveStage<18, u16, ApplyEdgeOrientation, EdgeOrientationSolved,7>(
-        packEdgeOrientationState, 7, deviceMoves
+        packEdgeOrientationState, 7, d_moves
     );
 }
 
@@ -80,10 +80,10 @@ struct CornerTwistAndEquatorSliceSolved {
 };
 
 std::vector<std::string> solveStage2() {
-    const int *deviceMoves = nullptr;
-    cudaGetSymbolAddress((void **)&deviceMoves, d_allowedMovesStage2);
+    const int *d_moves = nullptr;
+    cudaGetSymbolAddress((void **)&d_moves, d_allowedMovesStage2);
     return solveStage<14, u32, ApplyCornerTwistAndEquatorSlice, CornerTwistAndEquatorSliceSolved, 10>(
-        PackCornerTwistAndEquatorSliceState::pack, 10, deviceMoves
+        PackCornerTwistAndEquatorSliceState::pack, 10, d_moves
     );
 }
 
@@ -150,10 +150,10 @@ struct CornerPermutationAndMiddleSliceSolved {
 };
 
 std::vector<std::string> solveStage3() {
-    const int *deviceMoves = nullptr;
-    cudaGetSymbolAddress((void **)&deviceMoves, d_allowedMovesStage3);
+    const int *d_moves = nullptr;
+    cudaGetSymbolAddress((void **)&d_moves, d_allowedMovesStage3);
     return solveStage<10, u64, ApplyCornerPermutationAndMiddleSlice, CornerPermutationAndMiddleSliceSolved, 13>(
-        PackCornerPermutationAndMiddleSliceState::pack, 13, deviceMoves
+        PackCornerPermutationAndMiddleSliceState::pack, 13, d_moves
     );
 }
 
@@ -197,9 +197,9 @@ struct FinalPermutationSolved {
 };
 
 std::vector<std::string> solveStage4() {
-    const int *deviceMoves = nullptr;
-    cudaGetSymbolAddress((void **)&deviceMoves, d_allowedMovesStage4);
+    const int *d_moves = nullptr;
+    cudaGetSymbolAddress((void **)&d_moves, d_allowedMovesStage4);
     return solveStage<6, FinalPermutationState, ApplyFinalPermutation, FinalPermutationSolved, 15>(
-        PackFinalPermutationState::pack, 15, deviceMoves
+        PackFinalPermutationState::pack, 15, d_moves
     );
 }
